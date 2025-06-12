@@ -14,7 +14,7 @@ import {
   Building2, 
   Users, 
   Package, 
-  Handshake, 
+  Heart, 
   UserPlus, 
   Plus, 
   Edit, 
@@ -445,7 +445,7 @@ const AdminDashboard = () => {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Partnerships</CardTitle>
-              <Handshake className="h-4 w-4 text-muted-foreground" />
+              <Heart className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
@@ -509,7 +509,7 @@ const AdminDashboard = () => {
                     Manage Packages
                   </Button>
                   <Button className="w-full justify-start" variant="outline" onClick={() => setActiveTab('partnerships')}>
-                    <Handshake className="h-4 w-4 mr-2" />
+                    <Heart className="h-4 w-4 mr-2" />
                     Manage Partnerships
                   </Button>
                 </CardContent>
