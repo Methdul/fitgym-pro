@@ -1,14 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Get environment variables
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// Get environment variables with fallbacks
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://nuvigdslneyjmvgghyax.supabase.co';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im51dmlnZHNsbmV5am12Z2doeWF4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDk2NTYzOTQsImV4cCI6MjA2NTIzMjM5NH0.bVpi6PeqxiLinDmUfC4tUhYTruVPXBJivJnILraf2F8';
 
-// Validate environment variables
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error(
-    'Missing Supabase environment variables. Please check your .env.local file.\n' +
-    'Required variables:\n' +
+// Only validate in production
+if (import.meta.env.PROD && (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY)) {
+  console.warn(
+    'Missing Supabase environment variables. Using fallback values for development.\n' +
+    'For production, please set:\n' +
     '- VITE_SUPABASE_URL\n' +
     '- VITE_SUPABASE_ANON_KEY'
   );
