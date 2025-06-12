@@ -1,0 +1,484 @@
+
+import { useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Crown, Shield, User, Plus, Trash2 } from 'lucide-react';
+import { db } from '@/lib/supabase';
+import { useToast } from '@/hooks/use-toast';
+import type { BranchStaff } from '@/types';
+
+interface StaffManagementProps {
+  staff: BranchStaff[];
+  branchId: string;
+  onStaffUpdate: () => void;
+}
+
+export const StaffManagement = ({ staff, branchId, onStaffUpdate }: StaffManagementProps) => {
+  const [showAddStaff, setShowAddStaff] = useState(false);
+  const [showRemoveStaff, setShowRemoveStaff] = useState(false);
+  const [selectedStaff, setSelectedStaff] = useState<BranchStaff | null>(null);
+  const [loading, setLoading] = useState(false);
+  const { toast } = useToast();
+
+  // Add Staff Form State
+  const [newStaff, setNewStaff] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    role: '',
+    pin: ''
+  });
+
+  // Remove Staff Form State
+  const [removeForm, setRemoveForm] = useState({
+    authorizingStaffId: '',
+    pin: '',
+    reason: ''
+  });
+
+  const getRoleIcon = (role: string) => {
+    switch (role) {
+      case 'manager': return Crown;
+      case 'senior_staff': return Shield;
+      default: return User;
+    }
+  };
+
+  const getRoleBadgeColor = (role: string) => {
+    switch (role) {
+      case 'manager': return 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20';
+      case 'senior_staff': return 'bg-blue-500/10 text-blue-500 border-blue-500/20';
+      default: return 'bg-green-500/10 text-green-500 border-green-500/20';
+    }
+  };
+
+  const seniorStaff = staff.filter(s => s.role === 'manager' || s.role === 'senior_staff');
+
+  const handleAddStaff = async () => {
+    if (!newStaff.firstName || !newStaff.lastName || !newStaff.email || !newStaff.role || !newStaff.pin) {
+      toast({
+        title: "Missing Information",
+        description: "Please fill in all required fields",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (newStaff.pin.length !== 4 || !/^\d{4}$/.test(newStaff.pin)) {
+      toast({
+        title: "Invalid PIN",
+        description: "PIN must be exactly 4 digits",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { error } = await db.staff.create({
+        branch_id: branchId,
+        first_name: newStaff.firstName,
+        last_name: newStaff.lastName,
+        email: newStaff.email,
+        phone: newStaff.phone || null,
+        role: newStaff.role,
+        pin: newStaff.pin
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Staff Added",
+        description: `${newStaff.firstName} ${newStaff.lastName} has been added to the team`
+      });
+
+      setNewStaff({
+        firstName: '',
+        lastName: '',
+        email: '',
+        phone: '',
+        role: '',
+        pin: ''
+      });
+      setShowAddStaff(false);
+      onStaffUpdate();
+    } catch (error) {
+      console.error('Error adding staff:', error);
+      toast({
+        title: "Error",
+        description: "Failed to add staff member",
+        variant: "destructive"
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRemoveStaff = async () => {
+    if (!selectedStaff || !removeForm.authorizingStaffId || !removeForm.pin || !removeForm.reason) {
+      toast({
+        title: "Missing Information",
+        description: "Please fill in all required fields",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (removeForm.reason.length < 10) {
+      toast({
+        title: "Invalid Reason",
+        description: "Reason must be at least 10 characters",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Verify authorizing staff PIN
+      const { isValid } = await db.staff.verifyPin(removeForm.authorizingStaffId, removeForm.pin);
+      
+      if (!isValid) {
+        toast({
+          title: "Invalid PIN",
+          description: "The entered PIN is incorrect",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      // Log the action
+      await db.actionLogs.create({
+        staff_id: removeForm.authorizingStaffId,
+        action_type: 'STAFF_REMOVED',
+        description: `Removed staff member: ${selectedStaff.first_name} ${selectedStaff.last_name}. Reason: ${removeForm.reason}`,
+        created_at: new Date().toISOString()
+      });
+
+      // Remove staff
+      const { error } = await db.staff.delete(selectedStaff.id);
+      if (error) throw error;
+
+      toast({
+        title: "Staff Removed",
+        description: `${selectedStaff.first_name} ${selectedStaff.last_name} has been removed from the team`
+      });
+
+      setShowRemoveStaff(false);
+      setSelectedStaff(null);
+      setRemoveForm({
+        authorizingStaffId: '',
+        pin: '',
+        reason: ''
+      });
+      onStaffUpdate();
+    } catch (error) {
+      console.error('Error removing staff:', error);
+      toast({
+        title: "Error",
+        description: "Failed to remove staff member",
+        variant: "destructive"
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Staff Header */}
+      <Card className="gym-card-gradient border-border">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Staff Management</CardTitle>
+              <p className="text-muted-foreground">Manage branch team members and their permissions</p>
+            </div>
+            <Button onClick={() => setShowAddStaff(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Staff Member
+            </Button>
+          </div>
+        </CardHeader>
+      </Card>
+
+      {/* Staff Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {staff.map((staffMember) => {
+          const RoleIcon = getRoleIcon(staffMember.role);
+          return (
+            <Card key={staffMember.id} className="gym-card-gradient border-border">
+              <CardHeader className="pb-3">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      {staffMember.first_name} {staffMember.last_name}
+                      <RoleIcon className="h-4 w-4 text-primary" />
+                    </CardTitle>
+                    <Badge className={getRoleBadgeColor(staffMember.role)}>
+                      {staffMember.role.replace('_', ' ')}
+                    </Badge>
+                  </div>
+                  {staffMember.role !== 'manager' && (
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="text-red-500 hover:text-red-600"
+                      onClick={() => {
+                        setSelectedStaff(staffMember);
+                        setShowRemoveStaff(true);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <div className="text-sm space-y-1">
+                  <p><span className="text-muted-foreground">Email:</span> {staffMember.email}</p>
+                  {staffMember.phone && (
+                    <p><span className="text-muted-foreground">Phone:</span> {staffMember.phone}</p>
+                  )}
+                  <p><span className="text-muted-foreground">PIN:</span> ****</p>
+                  <p><span className="text-muted-foreground">Joined:</span> {new Date(staffMember.created_at).toLocaleDateString()}</p>
+                  {staffMember.last_active && (
+                    <p><span className="text-muted-foreground">Last Active:</span> {new Date(staffMember.last_active).toLocaleDateString()}</p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+
+      {/* Role Permissions Display */}
+      <Card className="gym-card-gradient border-border">
+        <CardHeader>
+          <CardTitle>Role Permissions</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <Crown className="h-5 w-5 text-yellow-500" />
+                <h4 className="font-semibold">Manager</h4>
+              </div>
+              <ul className="text-sm space-y-1 text-muted-foreground">
+                <li>• Full branch access</li>
+                <li>• Manage all members</li>
+                <li>• Add/remove staff</li>
+                <li>• View all reports</li>
+              </ul>
+            </div>
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <Shield className="h-5 w-5 text-blue-500" />
+                <h4 className="font-semibold">Senior Staff</h4>
+              </div>
+              <ul className="text-sm space-y-1 text-muted-foreground">
+                <li>• Manage members</li>
+                <li>• Remove associates</li>
+                <li>• Process renewals</li>
+                <li>• View member reports</li>
+              </ul>
+            </div>
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <User className="h-5 w-5 text-green-500" />
+                <h4 className="font-semibold">Associate</h4>
+              </div>
+              <ul className="text-sm space-y-1 text-muted-foreground">
+                <li>• View members</li>
+                <li>• Add new members</li>
+                <li>• Process renewals</li>
+                <li>• Update member info</li>
+              </ul>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Add Staff Modal */}
+      <Dialog open={showAddStaff} onOpenChange={setShowAddStaff}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add Staff Member</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="firstName">First Name *</Label>
+                <Input
+                  id="firstName"
+                  value={newStaff.firstName}
+                  onChange={(e) => setNewStaff(prev => ({ ...prev, firstName: e.target.value }))}
+                  placeholder="John"
+                />
+              </div>
+              <div>
+                <Label htmlFor="lastName">Last Name *</Label>
+                <Input
+                  id="lastName"
+                  value={newStaff.lastName}
+                  onChange={(e) => setNewStaff(prev => ({ ...prev, lastName: e.target.value }))}
+                  placeholder="Doe"
+                />
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="email">Email *</Label>
+              <Input
+                id="email"
+                type="email"
+                value={newStaff.email}
+                onChange={(e) => setNewStaff(prev => ({ ...prev, email: e.target.value }))}
+                placeholder="john.doe@fitgym.com"
+              />
+            </div>
+            <div>
+              <Label htmlFor="phone">Phone</Label>
+              <Input
+                id="phone"
+                value={newStaff.phone}
+                onChange={(e) => setNewStaff(prev => ({ ...prev, phone: e.target.value }))}
+                placeholder="+1 (555) 123-4567"
+              />
+            </div>
+            <div>
+              <Label htmlFor="role">Role *</Label>
+              <Select value={newStaff.role} onValueChange={(value) => setNewStaff(prev => ({ ...prev, role: value }))}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select role" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="associate">
+                    <div className="flex items-center gap-2">
+                      <User className="h-4 w-4" />
+                      Associate - Basic member management
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="senior_staff">
+                    <div className="flex items-center gap-2">
+                      <Shield className="h-4 w-4" />
+                      Senior Staff - Can remove associates
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="manager">
+                    <div className="flex items-center gap-2">
+                      <Crown className="h-4 w-4" />
+                      Manager - Full branch access
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="pin">4-Digit PIN *</Label>
+              <Input
+                id="pin"
+                type="password"
+                maxLength={4}
+                value={newStaff.pin}
+                onChange={(e) => setNewStaff(prev => ({ ...prev, pin: e.target.value.replace(/\D/g, '') }))}
+                placeholder="1234"
+              />
+            </div>
+            <div className="flex gap-2 pt-4">
+              <Button variant="outline" onClick={() => setShowAddStaff(false)} className="flex-1">
+                Cancel
+              </Button>
+              <Button onClick={handleAddStaff} disabled={loading} className="flex-1">
+                {loading ? 'Adding...' : 'Add Staff Member'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Remove Staff Modal */}
+      <Dialog open={showRemoveStaff} onOpenChange={setShowRemoveStaff}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Remove Staff Member</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4">
+              <div className="flex items-center gap-2 text-red-500 font-medium mb-2">
+                <Trash2 className="h-4 w-4" />
+                Warning: Permanent Action
+              </div>
+              <p className="text-sm text-red-600">
+                You are about to remove {selectedStaff?.first_name} {selectedStaff?.last_name} from the team.
+                This action cannot be undone.
+              </p>
+            </div>
+
+            <div>
+              <Label htmlFor="authStaff">Authorizing Staff Member *</Label>
+              <Select 
+                value={removeForm.authorizingStaffId} 
+                onValueChange={(value) => setRemoveForm(prev => ({ ...prev, authorizingStaffId: value }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select authorizing staff" />
+                </SelectTrigger>
+                <SelectContent>
+                  {seniorStaff.map((staff) => (
+                    <SelectItem key={staff.id} value={staff.id}>
+                      {staff.first_name} {staff.last_name} ({staff.role.replace('_', ' ')})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label htmlFor="authPin">Your 4-Digit PIN *</Label>
+              <Input
+                id="authPin"
+                type="password"
+                maxLength={4}
+                value={removeForm.pin}
+                onChange={(e) => setRemoveForm(prev => ({ ...prev, pin: e.target.value.replace(/\D/g, '') }))}
+                placeholder="Enter your PIN"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="reason">Reason for Removal *</Label>
+              <Textarea
+                id="reason"
+                value={removeForm.reason}
+                onChange={(e) => setRemoveForm(prev => ({ ...prev, reason: e.target.value }))}
+                placeholder="Provide a detailed reason for removing this staff member (minimum 10 characters)"
+                rows={3}
+              />
+            </div>
+
+            <div className="flex gap-2 pt-4">
+              <Button variant="outline" onClick={() => setShowRemoveStaff(false)} className="flex-1">
+                Cancel
+              </Button>
+              <Button 
+                variant="destructive" 
+                onClick={handleRemoveStaff} 
+                disabled={loading} 
+                className="flex-1"
+              >
+                {loading ? 'Removing...' : 'Remove Staff Member'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
