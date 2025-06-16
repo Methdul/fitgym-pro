@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { 
   ArrowLeft, 
   Users, 
@@ -24,9 +24,9 @@ import {
   Eye,
   UserPlus,
   CheckCircle,
-  Clock,
   Settings,
-  Building2
+  Building2,
+  Trash2
 } from 'lucide-react';
 import { db } from '@/lib/supabase';
 import { AddNewMemberModal } from '@/components/staff/AddNewMemberModal';
@@ -43,7 +43,6 @@ const StaffDashboard = () => {
   const [branch, setBranch] = useState<Branch | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [staff, setStaff] = useState<BranchStaff[]>([]);
-  const [checkIns, setCheckIns] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -55,6 +54,45 @@ const StaffDashboard = () => {
   const [showAuthModal, setShowAuthModal] = useState(true);
   const [authenticatedStaff, setAuthenticatedStaff] = useState<any>(null);
   const [loginMethod, setLoginMethod] = useState<'pin' | 'credentials' | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [memberToDelete, setMemberToDelete] = useState<Member | null>(null);
+
+  // Helper function to get the ACTUAL status of a member based on expiry date
+  const getActualMemberStatus = (member: Member) => {
+    const now = new Date();
+    const expiryDate = new Date(member.expiry_date);
+    
+    // If expiry date has passed, member is actually expired regardless of database status
+    if (expiryDate < now) {
+      return 'expired';
+    }
+    
+    // If member is suspended in database, keep that status
+    if (member.status === 'suspended') {
+      return 'suspended';
+    }
+    
+    // Otherwise, member is active
+    return 'active';
+  };
+
+  // Helper function to determine if member can be renewed - DEFINED EARLY
+  const canRenewMember = (member: Member) => {
+    const now = new Date();
+    const expiryDate = new Date(member.expiry_date);
+    
+    // Member can be renewed if:
+    // 1. Status is explicitly 'expired', OR
+    // 2. Expiry date has passed (regardless of status)
+    return member.status === 'expired' || expiryDate < now;
+  };
+
+  const isExpiringSoon = (member: Member) => {
+    const now = new Date();
+    const expiryDate = new Date(member.expiry_date);
+    const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    return member.status === 'active' && expiryDate <= nextWeek && expiryDate > now;
+  };
 
   useEffect(() => {
     // Check if user came from branch credential login
@@ -114,17 +152,15 @@ const StaffDashboard = () => {
     if (!branchId) return;
     
     try {
-      const [branchData, membersData, staffData, checkInsData] = await Promise.all([
+      const [branchData, membersData, staffData] = await Promise.all([
         db.branches.getById(branchId),
         db.members.getByBranch(branchId),
-        db.staff.getByBranch(branchId),
-        db.checkIns.getTodayByBranch(branchId)
+        db.staff.getByBranch(branchId)
       ]);
 
       if (branchData.data) setBranch(branchData.data);
       if (membersData.data) setMembers(membersData.data);
       if (staffData.data) setStaff(staffData.data);
-      if (checkInsData.data) setCheckIns(checkInsData.data);
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
     } finally {
@@ -137,11 +173,12 @@ const StaffDashboard = () => {
     const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
     const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     
-    const activeMembers = members.filter(m => m.status === 'active').length;
-    const expiredMembers = members.filter(m => m.status === 'expired').length;
+    // Use actual status calculation for more accurate stats
+    const activeMembers = members.filter(m => getActualMemberStatus(m) === 'active').length;
+    const expiredMembers = members.filter(m => canRenewMember(m)).length; // Use canRenewMember for consistency
     const expiringMembers = members.filter(m => {
       const expiryDate = new Date(m.expiry_date);
-      return m.status === 'active' && expiryDate <= nextWeek && expiryDate > now;
+      return getActualMemberStatus(m) === 'active' && expiryDate <= nextWeek && expiryDate > now;
     }).length;
 
     const monthlyRevenue = members
@@ -169,24 +206,32 @@ const StaffDashboard = () => {
       newMembersThisMonth,
       retentionRate,
       seniorStaffCount,
-      todayCheckIns: checkIns.length
+      todayCheckIns: 0 // Disabled check-ins feature
     };
   };
 
   const filteredMembers = members.filter(member => {
     const matchesSearch = `${member.first_name} ${member.last_name} ${member.email} ${member.phone}`
       .toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || member.status === statusFilter ||
-      (statusFilter === 'expiring' && isExpiringSoon(member));
+    
+    let matchesStatus = false;
+    if (statusFilter === 'all') {
+      matchesStatus = true;
+    } else if (statusFilter === 'expired') {
+      // Use the same logic as canRenewMember for expired filter
+      matchesStatus = canRenewMember(member);
+    } else if (statusFilter === 'expiring') {
+      matchesStatus = isExpiringSoon(member);
+    } else if (statusFilter === 'active') {
+      // Use actual status for active filter
+      matchesStatus = getActualMemberStatus(member) === 'active';
+    } else {
+      // For other statuses (suspended), use the actual status
+      matchesStatus = getActualMemberStatus(member) === statusFilter;
+    }
+    
     return matchesSearch && matchesStatus;
   });
-
-  const isExpiringSoon = (member: Member) => {
-    const now = new Date();
-    const expiryDate = new Date(member.expiry_date);
-    const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-    return member.status === 'active' && expiryDate <= nextWeek && expiryDate > now;
-  };
 
   const getStatusBadgeColor = (status: string) => {
     switch (status) {
@@ -214,6 +259,75 @@ const StaffDashboard = () => {
       case 'renew':
         setShowRenewMember(true);
         break;
+      case 'delete':
+        setMemberToDelete(member);
+        setDeleteConfirmOpen(true);
+        break;
+    }
+  };
+
+  const handleDeleteMember = async () => {
+    if (!memberToDelete) return;
+
+    try {
+      // Get auth token if available (for development, this might be optional based on your middleware)
+      const authToken = localStorage.getItem('access_token');
+      
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      
+      // Add auth header if token exists
+      if (authToken) {
+        headers['Authorization'] = `Bearer ${authToken}`;
+      }
+
+      // Use full backend URL - your backend runs on port 5001
+      const response = await fetch(`http://localhost:5001/api/members/${memberToDelete.id}`, {
+        method: 'DELETE',
+        headers,
+      });
+
+      // Check if response is ok first
+      if (!response.ok) {
+        console.error(`❌ HTTP Error: ${response.status} ${response.statusText}`);
+        
+        // Try to get error message from response
+        let errorMessage = `Failed to delete member (${response.status})`;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorData.message || errorMessage;
+        } catch {
+          // If response isn't JSON, use status text
+          errorMessage = `${response.status}: ${response.statusText}`;
+        }
+        
+        throw new Error(errorMessage);
+      }
+
+      const result = await response.json();
+
+      if (result.status === 'success') {
+        // Show success message
+        console.log('✅ Member deleted successfully');
+        
+        // Refresh members data
+        if (branchId) {
+          const { data } = await db.members.getByBranch(branchId);
+          if (data) setMembers(data);
+        }
+        
+        // Close dialog and reset state
+        setDeleteConfirmOpen(false);
+        setMemberToDelete(null);
+      } else {
+        console.error('❌ Failed to delete member:', result.error);
+        throw new Error(result.error || 'Failed to delete member');
+      }
+    } catch (error) {
+      console.error('❌ Error deleting member:', error);
+      // Keep dialog open so user knows something went wrong
+      alert(`Failed to delete member: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
@@ -311,7 +425,6 @@ const StaffDashboard = () => {
                 {authenticatedStaff?.first_name} {authenticatedStaff?.last_name}
               </span>
             </div>
-            {/* FIXED: Changed from <p> to <div> to fix DOM nesting warning */}
             <div className="text-sm text-muted-foreground">
               {loginMethod === 'credentials' ? (
                 <>
@@ -450,9 +563,8 @@ const StaffDashboard = () => {
 
         {/* Main Content */}
         <Tabs defaultValue="members" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3 lg:w-96">
+          <TabsList className="grid w-full grid-cols-2 lg:w-64">
             <TabsTrigger value="members">Members</TabsTrigger>
-            <TabsTrigger value="checkins">Check-ins</TabsTrigger>
             <TabsTrigger value="staff">Staff</TabsTrigger>
           </TabsList>
 
@@ -508,77 +620,104 @@ const StaffDashboard = () => {
 
             {/* Members Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredMembers.map((member) => (
-                <Card key={member.id} className="border-border hover:border-primary transition-colors">
-                  <CardHeader className="pb-3">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <CardTitle className="text-lg">
-                          {member.first_name} {member.last_name}
-                        </CardTitle>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Badge className={getStatusBadgeColor(member.status)}>
-                            {member.status}
-                          </Badge>
-                          {member.is_verified && (
-                            <Badge variant="secondary" className="text-xs">
-                              Verified
+              {filteredMembers.map((member) => {
+                const actualStatus = getActualMemberStatus(member);
+                return (
+                  <Card key={member.id} className="border-border hover:border-primary transition-colors">
+                    <CardHeader className="pb-3">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <CardTitle className="text-lg">
+                            {member.first_name} {member.last_name}
+                          </CardTitle>
+                          <div className="flex items-center gap-2 mt-1">
+                            <Badge className={getStatusBadgeColor(actualStatus)}>
+                              {actualStatus}
                             </Badge>
-                          )}
-                          {isExpiringSoon(member) && (
-                            <Badge variant="destructive" className="text-xs">
-                              Expiring Soon
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                      <Dialog>
-                        <DialogTrigger asChild>
-                          <Button variant="ghost" size="sm">
-                            <MoreVertical className="h-4 w-4" />
-                          </Button>
-                        </DialogTrigger>
-                        <DialogContent className="w-auto">
-                          <div className="space-y-2">
-                            <Button 
-                              variant="ghost" 
-                              className="w-full justify-start"
-                              onClick={() => handleMemberAction(member, 'view')}
-                            >
-                              <Eye className="h-4 w-4 mr-2" />
-                              View Profile
-                            </Button>
-                            <Button 
-                              variant="ghost" 
-                              className="w-full justify-start"
-                              onClick={() => handleMemberAction(member, 'renew')}
-                            >
-                              Renew Membership
-                            </Button>
+                            {member.is_verified && (
+                              <Badge variant="secondary" className="text-xs">
+                                Verified
+                              </Badge>
+                            )}
+                            {isExpiringSoon(member) && (
+                              <Badge variant="destructive" className="text-xs">
+                                Expiring Soon
+                              </Badge>
+                            )}
                           </div>
-                        </DialogContent>
-                      </Dialog>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    <div className="text-sm space-y-1">
-                      <p><span className="text-muted-foreground">Email:</span> {member.email}</p>
-                      <p><span className="text-muted-foreground">Phone:</span> {member.phone}</p>
-                      <p><span className="text-muted-foreground">Package:</span> {member.package_name}</p>
-                      <p><span className="text-muted-foreground">Expires:</span> {new Date(member.expiry_date).toLocaleDateString()}</p>
-                    </div>
-                    <div className="flex gap-2 pt-2">
-                      <Button size="sm" variant="outline" className="flex-1" onClick={() => handleMemberAction(member, 'view')}>
-                        <Eye className="h-4 w-4 mr-1" />
-                        View
-                      </Button>
-                      <Button size="sm" className="flex-1" onClick={() => handleMemberAction(member, 'renew')}>
-                        Renew
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+                        </div>
+                        <Dialog>
+                          <DialogTrigger asChild>
+                            <Button variant="ghost" size="sm">
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DialogTrigger>
+                          <DialogContent className="w-auto">
+                            <div className="space-y-2">
+                              <Button 
+                                variant="ghost" 
+                                className="w-full justify-start"
+                                onClick={() => handleMemberAction(member, 'view')}
+                              >
+                                <Eye className="h-4 w-4 mr-2" />
+                                View Profile
+                              </Button>
+                              {/* Only show Renew option for expired members */}
+                              {canRenewMember(member) && (
+                                <Button 
+                                  variant="ghost" 
+                                  className="w-full justify-start"
+                                  onClick={() => handleMemberAction(member, 'renew')}
+                                >
+                                  Renew Membership
+                                </Button>
+                              )}
+                              {/* Delete option - always available for staff */}
+                              <Button 
+                                variant="ghost" 
+                                className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50"
+                                onClick={() => handleMemberAction(member, 'delete')}
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Delete Member
+                              </Button>
+                            </div>
+                          </DialogContent>
+                        </Dialog>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      <div className="text-sm space-y-1">
+                        <p><span className="text-muted-foreground">Email:</span> {member.email}</p>
+                        <p><span className="text-muted-foreground">Phone:</span> {member.phone}</p>
+                        <p><span className="text-muted-foreground">Package:</span> {member.package_name}</p>
+                        <p><span className="text-muted-foreground">Expires:</span> {new Date(member.expiry_date).toLocaleDateString()}</p>
+                      </div>
+                      <div className="flex gap-2 pt-2">
+                        <Button 
+                          size="sm" 
+                          variant="outline" 
+                          className={canRenewMember(member) ? "flex-1" : "w-full"} 
+                          onClick={() => handleMemberAction(member, 'view')}
+                        >
+                          <Eye className="h-4 w-4 mr-1" />
+                          View
+                        </Button>
+                        {/* Only show Renew button for expired members */}
+                        {canRenewMember(member) && (
+                          <Button 
+                            size="sm" 
+                            className="flex-1" 
+                            onClick={() => handleMemberAction(member, 'renew')}
+                          >
+                            Renew
+                          </Button>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
 
             {/* Empty State */}
@@ -600,45 +739,6 @@ const StaffDashboard = () => {
                 )}
               </div>
             )}
-          </TabsContent>
-
-          <TabsContent value="checkins" className="space-y-6">
-            <Card className="border-border">
-              <CardHeader>
-                <CardTitle>Today's Check-ins</CardTitle>
-                <p className="text-muted-foreground">Members who checked in today</p>
-              </CardHeader>
-              <CardContent>
-                {checkIns.length === 0 ? (
-                  <div className="text-center py-8">
-                    <Clock className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                    <h3 className="text-lg font-medium mb-2">No check-ins today</h3>
-                    <p className="text-muted-foreground">
-                      Check-ins will appear here as members visit the gym
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {checkIns.map((checkIn) => (
-                      <div key={checkIn.id} className="flex items-center justify-between p-4 border rounded-lg">
-                        <div>
-                          <p className="font-medium">
-                            {checkIn.members?.first_name} {checkIn.members?.last_name}
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            Checked in at {checkIn.check_in_time}
-                          </p>
-                        </div>
-                        <Badge variant="secondary">
-                          <CheckCircle className="h-3 w-3 mr-1" />
-                          Present
-                        </Badge>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
           </TabsContent>
 
           <TabsContent value="staff" className="space-y-6">
@@ -705,6 +805,58 @@ const StaffDashboard = () => {
             />
           </>
         )}
+
+        {/* Delete Confirmation Dialog */}
+        <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Trash2 className="h-5 w-5 text-red-500" />
+                Delete Member
+              </DialogTitle>
+              <DialogDescription>
+                Are you sure you want to delete this member? This action cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            
+            {memberToDelete && (
+              <div className="py-4">
+                <div className="bg-muted p-4 rounded-lg">
+                  <h4 className="font-medium mb-2">Member Details:</h4>
+                  <div><strong>Name:</strong> {memberToDelete.first_name} {memberToDelete.last_name}</div>
+                  <div><strong>Email:</strong> {memberToDelete.email}</div>
+                  <div><strong>Phone:</strong> {memberToDelete.phone}</div>
+                  <div className="flex items-center gap-2">
+                    <strong>Status:</strong>
+                    <Badge className={getStatusBadgeColor(getActualMemberStatus(memberToDelete))}>
+                      {getActualMemberStatus(memberToDelete)}
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <DialogFooter className="gap-2">
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setDeleteConfirmOpen(false);
+                  setMemberToDelete(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button 
+                variant="destructive" 
+                onClick={handleDeleteMember}
+                className="bg-red-600 hover:bg-red-700"
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete Member
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
