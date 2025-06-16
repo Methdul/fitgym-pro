@@ -1,5 +1,4 @@
-
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { 
@@ -8,16 +7,67 @@ import {
   DropdownMenuItem, 
   DropdownMenuTrigger 
 } from '@/components/ui/dropdown-menu';
-import { Dumbbell, Menu, X, User, LogOut, Settings } from 'lucide-react';
+import { Dumbbell, Menu, X, User, LogOut, Settings, Building2, Shield } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
+
+interface BranchSession {
+  sessionToken: string;
+  branchId: string;
+  branchName: string;
+  branchEmail: string;
+  loginTime: string;
+  userType: string;
+}
 
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
+  const [branchSession, setBranchSession] = useState<BranchSession | null>(null);
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
 
+  // Check for branch session on mount and storage changes
+  useEffect(() => {
+    const checkBranchSession = () => {
+      const sessionData = localStorage.getItem('branch_session');
+      if (sessionData) {
+        try {
+          const session = JSON.parse(sessionData);
+          setBranchSession(session);
+        } catch (error) {
+          console.error('Invalid branch session data:', error);
+          localStorage.removeItem('branch_session');
+          setBranchSession(null);
+        }
+      } else {
+        setBranchSession(null);
+      }
+    };
+
+    // Check on mount
+    checkBranchSession();
+
+    // Listen for storage changes (in case user logs out from another tab)
+    window.addEventListener('storage', checkBranchSession);
+    
+    // Check periodically in case localStorage changes from same tab
+    const interval = setInterval(checkBranchSession, 1000);
+
+    return () => {
+      window.removeEventListener('storage', checkBranchSession);
+      clearInterval(interval);
+    };
+  }, []);
+
   const handleSignOut = async () => {
+    // Sign out from regular auth
     await signOut();
+    navigate('/');
+  };
+
+  const handleBranchLogout = () => {
+    // Clear branch session
+    localStorage.removeItem('branch_session');
+    setBranchSession(null);
     navigate('/');
   };
 
@@ -27,6 +77,41 @@ const Navbar = () => {
     { name: 'Branches', path: '/branches' },
     { name: 'Partnerships', path: '/partnerships' },
   ];
+
+  // Determine current user type and display info
+  const isLoggedIn = user || branchSession;
+  const currentUserEmail = user?.email || branchSession?.branchEmail;
+  const currentUserType = user ? 'user' : branchSession ? 'branch' : null;
+
+  const getDashboardPath = () => {
+    if (user) {
+      // Check user role from profile (you might want to get this from your user profile)
+      return user.email?.includes('admin') ? '/admin' : '/member';
+    } else if (branchSession) {
+      return `/dashboard/staff/${branchSession.branchId}`;
+    }
+    return '/';
+  };
+
+  const getDashboardLabel = () => {
+    if (user) {
+      return user.email?.includes('admin') ? 'Admin Dashboard' : 'Member Dashboard';
+    } else if (branchSession) {
+      return 'Staff Dashboard';
+    }
+    return 'Dashboard';
+  };
+
+  const getUserIcon = () => {
+    if (user) {
+      return user.email?.includes('admin') ? Shield : User;
+    } else if (branchSession) {
+      return Building2;
+    }
+    return User;
+  };
+
+  const UserIcon = getUserIcon();
 
   return (
     <nav className="sticky top-0 z-50 glassmorphism">
@@ -54,22 +139,36 @@ const Navbar = () => {
 
           {/* Auth Section */}
           <div className="hidden md:flex items-center space-x-4">
-            {user ? (
+            {isLoggedIn ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="flex items-center space-x-2">
-                    <User className="h-4 w-4" />
-                    <span>{user.email}</span>
+                    <UserIcon className="h-4 w-4" />
+                    <div className="flex flex-col items-start">
+                      <span className="text-sm">{currentUserEmail}</span>
+                      {branchSession && (
+                        <span className="text-xs text-muted-foreground">
+                          {branchSession.branchName}
+                        </span>
+                      )}
+                    </div>
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuItem onClick={() => navigate('/member')}>
+                  <DropdownMenuItem onClick={() => navigate(getDashboardPath())}>
                     <Settings className="h-4 w-4 mr-2" />
-                    Dashboard
+                    {getDashboardLabel()}
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleSignOut}>
+                  <DropdownMenuItem 
+                    onClick={currentUserType === 'user' ? handleSignOut : handleBranchLogout}
+                  >
                     <LogOut className="h-4 w-4 mr-2" />
                     Sign Out
+                    {branchSession && (
+                      <span className="ml-2 text-xs text-muted-foreground">
+                        (Branch)
+                      </span>
+                    )}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -106,29 +205,53 @@ const Navbar = () => {
               </Link>
             ))}
             <div className="pt-4 border-t border-border">
-              {user ? (
+              {isLoggedIn ? (
                 <div className="space-y-2">
+                  {/* User Info Display */}
+                  <div className="px-3 py-2 text-sm">
+                    <div className="flex items-center space-x-2">
+                      <UserIcon className="h-4 w-4" />
+                      <div>
+                        <div className="font-medium">{currentUserEmail}</div>
+                        {branchSession && (
+                          <div className="text-xs text-muted-foreground">
+                            {branchSession.branchName}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  
                   <Button
                     variant="ghost"
                     className="w-full justify-start"
                     onClick={() => {
-                      navigate('/member');
+                      navigate(getDashboardPath());
                       setIsOpen(false);
                     }}
                   >
                     <Settings className="h-4 w-4 mr-2" />
-                    Dashboard
+                    {getDashboardLabel()}
                   </Button>
                   <Button
                     variant="ghost"
                     className="w-full justify-start"
                     onClick={() => {
-                      handleSignOut();
+                      if (currentUserType === 'user') {
+                        handleSignOut();
+                      } else {
+                        handleBranchLogout();
+                      }
                       setIsOpen(false);
                     }}
                   >
                     <LogOut className="h-4 w-4 mr-2" />
                     Sign Out
+                    {branchSession && (
+                      <span className="ml-2 text-xs text-muted-foreground">
+                        (Branch)
+                      </span>
+                    )}
                   </Button>
                 </div>
               ) : (

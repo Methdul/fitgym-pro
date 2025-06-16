@@ -87,27 +87,48 @@ export const auth = {
 
 // Enhanced database helpers
 export const db = {
-  // Staff operations
+  // Staff operations - UPDATED TO USE BACKEND API
   staff: {
-    getByBranch: (branchId: string) => 
-      supabase.from('branch_staff').select('*').eq('branch_id', branchId).order('role'),
+    getByBranch: async (branchId: string) => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+        console.log('🔍 Using API URL for staff:', API_BASE_URL);
+        
+        const response = await fetch(`${API_BASE_URL}/staff/branch/${branchId}`);
+        const result = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to fetch staff');
+        }
+        
+        return { data: result.data, error: null };
+      } catch (error) {
+        console.error('Error fetching staff:', error);
+        return { data: null, error: error instanceof Error ? error : new Error('Unknown error') };
+      }
+    },
     
     verifyPin: async (staffId: string, pin: string) => {
       try {
-        const { data, error } = await supabase.rpc('verify_staff_pin', {
-          p_staff_id: staffId,
-          p_pin: pin,
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+        const response = await fetch(`${API_BASE_URL}/staff/verify-pin`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ staffId, pin }),
         });
 
-        if (error) {
-          return { isValid: false, staff: null, error: error.message };
+        const result = await response.json();
+
+        if (!response.ok) {
+          return { isValid: false, staff: null, error: result.error || 'Verification failed' };
         }
 
-        const result = data?.[0];
         return {
-          isValid: result?.is_valid || false,
-          staff: result?.staff_data || null,
-          error: result?.error_message || null,
+          isValid: result.isValid || false,
+          staff: result.staff || null,
+          error: result.error || null,
         };
       } catch (error) {
         console.error('PIN verification error:', error);
@@ -115,13 +136,112 @@ export const db = {
       }
     },
 
-    getAll: () => supabase.from('branch_staff').select('*').order('created_at', { ascending: false }),
-    create: (staff: any) => supabase.from('branch_staff').insert(staff).select().single(),
-    update: (id: string, updates: any) => supabase.from('branch_staff').update(updates).eq('id', id).select().single(),
-    delete: (id: string) => supabase.from('branch_staff').delete().eq('id', id),
+    getAll: async () => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+        const response = await fetch(`${API_BASE_URL}/staff`);
+        const result = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to fetch all staff');
+        }
+        
+        return { data: result.data, error: null };
+      } catch (error) {
+        console.error('Error fetching all staff:', error);
+        return { data: null, error: error instanceof Error ? error : new Error('Unknown error') };
+      }
+    },
+
+    create: async (staff: any) => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+        console.log('🔧 Creating staff via API:', API_BASE_URL);
+        
+        const response = await fetch(`${API_BASE_URL}/staff`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(staff),
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to create staff member');
+        }
+
+        return { data: result.data, error: null };
+      } catch (error) {
+        console.error('Error creating staff:', error);
+        return { data: null, error: error instanceof Error ? error : new Error('Unknown error') };
+      }
+    },
+
+    update: async (id: string, updates: any) => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+        const response = await fetch(`${API_BASE_URL}/staff/${id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(updates),
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to update staff member');
+        }
+
+        return { data: result.data, error: null };
+      } catch (error) {
+        console.error('Error updating staff:', error);
+        return { data: null, error: error instanceof Error ? error : new Error('Unknown error') };
+      }
+    },
+
+    delete: async (id: string) => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+        const response = await fetch(`${API_BASE_URL}/staff/${id}`, {
+          method: 'DELETE',
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to delete staff member');
+        }
+
+        return { data: result.data, error: null };
+      } catch (error) {
+        console.error('Error deleting staff:', error);
+        return { data: null, error: error instanceof Error ? error : new Error('Unknown error') };
+      }
+    },
+
+    getById: async (id: string) => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+        const response = await fetch(`${API_BASE_URL}/staff/${id}`);
+        const result = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to fetch staff member');
+        }
+        
+        return { data: result.data, error: null };
+      } catch (error) {
+        console.error('Error fetching staff member:', error);
+        return { data: null, error: error instanceof Error ? error : new Error('Unknown error') };
+      }
+    },
   },
 
-  // Branches
+  // Branches - UNCHANGED
   branches: {
     getAll: () => supabase.from('branches').select('*').order('name'),
     getById: (id: string) => supabase.from('branches').select('*').eq('id', id).single(),
@@ -130,35 +250,289 @@ export const db = {
     delete: (id: string) => supabase.from('branches').delete().eq('id', id),
   },
 
-  // Members
+  // Members - UPDATED TO USE BACKEND API
   members: {
-    getByBranch: (branchId: string) => 
-      supabase.from('members').select('*').eq('branch_id', branchId).order('created_at', { ascending: false }),
-    getByUserId: (userId: string) => 
-      supabase.from('members').select('*').eq('user_id', userId).single(),
-    getById: (id: string) => supabase.from('members').select('*').eq('id', id).single(),
-    create: (member: any) => supabase.from('members').insert(member).select().single(),
-    update: (id: string, updates: any) => supabase.from('members').update(updates).eq('id', id).select().single(),
-    delete: (id: string) => supabase.from('members').delete().eq('id', id),
-    search: (branchId: string, query: string) => 
-      supabase.from('members')
-        .select('*')
-        .eq('branch_id', branchId)
-        .or(`first_name.ilike.%${query}%,last_name.ilike.%${query}%,email.ilike.%${query}%,national_id.ilike.%${query}%`),
-    getAll: () => supabase.from('members').select('*').order('created_at', { ascending: false }),
+    getByBranch: async (branchId: string) => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+        const response = await fetch(`${API_BASE_URL}/members/branch/${branchId}`);
+        const result = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to fetch members');
+        }
+        
+        return { data: result.data, error: null };
+      } catch (error) {
+        console.error('Error fetching members:', error);
+        return { data: null, error: error instanceof Error ? error : new Error('Unknown error') };
+      }
+    },
+
+    getByUserId: async (userId: string) => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+        const response = await fetch(`${API_BASE_URL}/members`);
+        const result = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to fetch members');
+        }
+        
+        // Filter by user_id on frontend since we don't have a specific endpoint
+        const member = result.data?.find((m: any) => m.user_id === userId);
+        return { data: member || null, error: null };
+      } catch (error) {
+        console.error('Error fetching member by user ID:', error);
+        return { data: null, error: error instanceof Error ? error : new Error('Unknown error') };
+      }
+    },
+
+    getById: async (id: string) => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+        const response = await fetch(`${API_BASE_URL}/members/${id}`);
+        const result = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to fetch member');
+        }
+        
+        return { data: result.data, error: null };
+      } catch (error) {
+        console.error('Error fetching member:', error);
+        return { data: null, error: error instanceof Error ? error : new Error('Unknown error') };
+      }
+    },
+
+    create: async (member: any) => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+        console.log('🔧 Creating member via API:', API_BASE_URL);
+        
+        const response = await fetch(`${API_BASE_URL}/members`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(member),
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to create member');
+        }
+
+        return { data: result.data, error: null };
+      } catch (error) {
+        console.error('Error creating member:', error);
+        return { data: null, error: error instanceof Error ? error : new Error('Unknown error') };
+      }
+    },
+
+    update: async (id: string, updates: any) => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+        const response = await fetch(`${API_BASE_URL}/members/${id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(updates),
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to update member');
+        }
+
+        return { data: result.data, error: null };
+      } catch (error) {
+        console.error('Error updating member:', error);
+        return { data: null, error: error instanceof Error ? error : new Error('Unknown error') };
+      }
+    },
+
+    delete: async (id: string) => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+        const response = await fetch(`${API_BASE_URL}/members/${id}`, {
+          method: 'DELETE',
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to delete member');
+        }
+
+        return { data: result.data, error: null };
+      } catch (error) {
+        console.error('Error deleting member:', error);
+        return { data: null, error: error instanceof Error ? error : new Error('Unknown error') };
+      }
+    },
+
+    search: async (branchId: string, query: string) => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+        const response = await fetch(`${API_BASE_URL}/members/search/${branchId}?q=${encodeURIComponent(query)}`);
+        const result = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to search members');
+        }
+        
+        return { data: result.data, error: null };
+      } catch (error) {
+        console.error('Error searching members:', error);
+        return { data: null, error: error instanceof Error ? error : new Error('Unknown error') };
+      }
+    },
+
+    getAll: async () => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+        const response = await fetch(`${API_BASE_URL}/members`);
+        const result = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to fetch all members');
+        }
+        
+        return { data: result.data, error: null };
+      } catch (error) {
+        console.error('Error fetching all members:', error);
+        return { data: null, error: error instanceof Error ? error : new Error('Unknown error') };
+      }
+    },
   },
 
-  // Packages
+  // Packages - UPDATED TO USE BACKEND API
   packages: {
-    getActive: () => supabase.from('packages').select('*').eq('is_active', true).order('price'),
-    getAll: () => supabase.from('packages').select('*').order('price'),
-    getById: (id: string) => supabase.from('packages').select('*').eq('id', id).single(),
-    create: (pkg: any) => supabase.from('packages').insert(pkg).select().single(),
-    update: (id: string, updates: any) => supabase.from('packages').update(updates).eq('id', id).select().single(),
-    delete: (id: string) => supabase.from('packages').delete().eq('id', id),
+    getActive: async () => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+        const response = await fetch(`${API_BASE_URL}/packages/active`);
+        const result = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to fetch active packages');
+        }
+        
+        return { data: result.data, error: null };
+      } catch (error) {
+        console.error('Error fetching active packages:', error);
+        return { data: null, error: error instanceof Error ? error : new Error('Unknown error') };
+      }
+    },
+
+    getAll: async () => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+        const response = await fetch(`${API_BASE_URL}/packages`);
+        const result = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to fetch packages');
+        }
+        
+        return { data: result.data, error: null };
+      } catch (error) {
+        console.error('Error fetching packages:', error);
+        return { data: null, error: error instanceof Error ? error : new Error('Unknown error') };
+      }
+    },
+
+    getById: async (id: string) => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+        const response = await fetch(`${API_BASE_URL}/packages/${id}`);
+        const result = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to fetch package');
+        }
+        
+        return { data: result.data, error: null };
+      } catch (error) {
+        console.error('Error fetching package:', error);
+        return { data: null, error: error instanceof Error ? error : new Error('Unknown error') };
+      }
+    },
+
+    create: async (pkg: any) => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+        const response = await fetch(`${API_BASE_URL}/packages`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(pkg),
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to create package');
+        }
+
+        return { data: result.data, error: null };
+      } catch (error) {
+        console.error('Error creating package:', error);
+        return { data: null, error: error instanceof Error ? error : new Error('Unknown error') };
+      }
+    },
+
+    update: async (id: string, updates: any) => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+        const response = await fetch(`${API_BASE_URL}/packages/${id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(updates),
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to update package');
+        }
+
+        return { data: result.data, error: null };
+      } catch (error) {
+        console.error('Error updating package:', error);
+        return { data: null, error: error instanceof Error ? error : new Error('Unknown error') };
+      }
+    },
+
+    delete: async (id: string) => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+        const response = await fetch(`${API_BASE_URL}/packages/${id}`, {
+          method: 'DELETE',
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to delete package');
+        }
+
+        return { data: result.data, error: null };
+      } catch (error) {
+        console.error('Error deleting package:', error);
+        return { data: null, error: error instanceof Error ? error : new Error('Unknown error') };
+      }
+    },
   },
 
-  // Partnerships
+  // Partnerships - UNCHANGED
   partnerships: {
     getAll: () => supabase.from('partnerships').select('*').order('name'),
     getActive: () => supabase.from('partnerships').select('*').eq('is_active', true).order('name'),
@@ -168,7 +542,7 @@ export const db = {
     delete: (id: string) => supabase.from('partnerships').delete().eq('id', id),
   },
 
-  // Gym Staff
+  // Gym Staff - UNCHANGED
   gymStaff: {
     getDisplayed: () => supabase.from('gym_staff').select('*').eq('is_displayed', true).order('name'),
     getAll: () => supabase.from('gym_staff').select('*').order('name'),
@@ -178,7 +552,7 @@ export const db = {
     delete: (id: string) => supabase.from('gym_staff').delete().eq('id', id),
   },
 
-  // Check-ins
+  // Check-ins - UNCHANGED
   checkIns: {
     getByMemberId: (memberId: string) => 
       supabase.from('member_check_ins').select('*, branches(name)').eq('member_id', memberId).order('check_in_date', { ascending: false }),
@@ -194,7 +568,7 @@ export const db = {
     getAll: () => supabase.from('member_check_ins').select('*, branches(name), members(first_name, last_name)').order('created_at', { ascending: false }),
   },
 
-  // Renewals
+  // Renewals - UNCHANGED
   renewals: {
     create: (renewal: any) => supabase.from('member_renewals').insert(renewal).select().single(),
     getByMemberId: (memberId: string) => 
@@ -202,7 +576,7 @@ export const db = {
     getAll: () => supabase.from('member_renewals').select('*, members(first_name, last_name), packages(name)').order('created_at', { ascending: false }),
   },
 
-  // Reports
+  // Reports - UNCHANGED
   reports: {
     getByMemberId: (memberId: string) => 
       supabase.from('member_reports').select('*').eq('member_id', memberId).order('created_at', { ascending: false }),
@@ -216,7 +590,7 @@ export const db = {
         .order('created_at', { ascending: false }),
   },
 
-  // Action Logs
+  // Action Logs - UNCHANGED
   actionLogs: {
     create: (log: any) => supabase.from('staff_actions_log').insert(log),
     getByBranch: (branchId: string) => 
@@ -227,7 +601,7 @@ export const db = {
     getAll: () => supabase.from('staff_actions_log').select('*, branch_staff(first_name, last_name), members(first_name, last_name)').order('created_at', { ascending: false }),
   },
 
-  // Users
+  // Users - UNCHANGED
   users: {
     getById: (id: string) => supabase.from('users').select('*').eq('id', id).single(),
     getByAuthId: (authId: string) => supabase.from('users').select('*').eq('auth_user_id', authId).single(),

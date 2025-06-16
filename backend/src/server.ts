@@ -4,16 +4,17 @@ import dotenv from 'dotenv';
 import helmet from 'helmet';
 import morgan from 'morgan';
 
-// Import routes (only the ones that exist)
+// Import routes (including the new member and package routes)
 import { authRoutes } from './routes/auth';
 import { staffRoutes } from './routes/staff';
-// Removed memberRoutes and branchRoutes since we haven't created them yet
+import { memberRoutes } from './routes/members';
+import { packageRoutes } from './routes/packages';
 
 // Load environment variables
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 
 // Security middleware
 app.use(helmet());
@@ -41,10 +42,51 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// API Routes (only the ones that exist)
+// API Routes - ENHANCED WITH MEMBER AND PACKAGE ROUTES
+console.log('🔧 Registering API routes...');
 app.use('/api/auth', authRoutes);
 app.use('/api/staff', staffRoutes);
-// Removed memberRoutes and branchRoutes for now
+app.use('/api/members', memberRoutes);
+app.use('/api/packages', packageRoutes);
+console.log('✅ Routes registered: /api/auth, /api/staff, /api/members, /api/packages');
+
+// Test endpoint for debugging
+app.get('/api/test', (req, res) => {
+  res.json({
+    status: 'success',
+    message: 'Test endpoint working',
+    availableRoutes: [
+      'GET /api/health',
+      'GET /api/test',
+      '--- AUTH ROUTES ---',
+      'POST /api/auth/signin',
+      'POST /api/auth/signup',
+      '--- STAFF ROUTES ---',
+      'GET /api/staff/branch/:branchId',
+      'POST /api/staff/verify-pin',
+      'POST /api/staff',
+      'GET /api/staff',
+      'PUT /api/staff/:id',
+      'DELETE /api/staff/:id',
+      'GET /api/staff/:id',
+      '--- MEMBER ROUTES ---',
+      'GET /api/members/branch/:branchId',
+      'POST /api/members',
+      'GET /api/members',
+      'PUT /api/members/:id',
+      'DELETE /api/members/:id',
+      'GET /api/members/:id',
+      'GET /api/members/search/:branchId',
+      '--- PACKAGE ROUTES ---',
+      'GET /api/packages/active',
+      'GET /api/packages',
+      'POST /api/packages',
+      'PUT /api/packages/:id',
+      'DELETE /api/packages/:id',
+      'GET /api/packages/:id'
+    ]
+  });
+});
 
 // Global error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -60,8 +102,9 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   });
 });
 
-// 404 handler
+// 404 handler - ENHANCED WITH LOGGING
 app.use('*', (req, res) => {
+  console.log(`❌ 404 - Route not found: ${req.method} ${req.originalUrl}`);
   res.status(404).json({
     status: 'error',
     message: 'Route not found',
@@ -75,6 +118,7 @@ app.listen(PORT, () => {
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🌐 API Health: http://localhost:${PORT}/api/health`);
   console.log(`🔐 Authentication: Enhanced with Supabase`);
+  console.log(`🧪 Test routes: http://localhost:${PORT}/api/test`);
 });
 
 export default app;

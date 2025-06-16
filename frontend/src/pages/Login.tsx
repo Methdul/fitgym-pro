@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Dumbbell, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Dumbbell, Eye, EyeOff, Loader2, Building2, User } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
 
@@ -15,98 +15,134 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [loginType, setLoginType] = useState<'user' | 'branch' | null>(null);
   
   const { signIn } = useAuth();
   const navigate = useNavigate();
 
   const demoAccounts = [
-    { role: 'Admin', email: 'admin@fitgym.com', password: 'admin123' },
-    { role: 'Member', email: 'member@fitgym.com', password: 'member123' },
+    { role: 'Admin', email: 'admin@fitgym.com', password: 'admin123', type: 'user' },
+    { role: 'Member', email: 'member@fitgym.com', password: 'member123', type: 'user' },
+    { role: 'Branch Staff', email: 'staff@downtown.fitgym.com', password: 'branch123', type: 'branch' },
   ];
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
+    setLoginType(null);
 
     try {
       console.log('🔐 Starting login process for:', email);
       
-      // Step 1: Sign in with Supabase Auth
-      const { data, error: signInError } = await signIn(email, password);
+      // Step 1: Try regular Supabase Auth first
+      console.log('📝 Attempting regular user login...');
+      const { data: userData, error: signInError } = await signIn(email, password);
       
-      if (signInError) {
-        console.error('❌ Sign in error:', signInError);
-        setError(signInError.message || 'Login failed');
-        return;
-      }
-
-      if (!data?.user) {
-        console.error('❌ No user data returned');
-        setError('Login failed - no user data');
-        return;
-      }
-
-      console.log('✅ Sign in successful, user ID:', data.user.id);
-
-      // Step 2: Get user profile with role
-      console.log('📋 Fetching user profile...');
-      
-      const { data: userProfile, error: profileError } = await supabase
-        .from('users')
-        .select('*')
-        .eq('auth_user_id', data.user.id)
-        .single();
-
-      if (profileError) {
-        console.error('❌ Profile fetch error:', profileError);
-        // If profile doesn't exist, create a basic one
-        const { error: createError } = await supabase
+      if (!signInError && userData?.user) {
+        console.log('✅ Regular user login successful');
+        setLoginType('user');
+        
+        // Get user profile with role
+        const { data: userProfile, error: profileError } = await supabase
           .from('users')
-          .insert({
-            auth_user_id: data.user.id,
-            email: data.user.email || email,
-            first_name: 'User',
-            last_name: 'Name',
-            role: email.includes('admin') ? 'admin' : 'member'
-          });
+          .select('*')
+          .eq('auth_user_id', userData.user.id)
+          .single();
 
-        if (createError) {
-          console.error('❌ Profile creation error:', createError);
-          setError('Could not create user profile');
+        if (profileError) {
+          console.log('⚠️ Creating user profile...');
+          // Create profile if doesn't exist
+          const { error: createError } = await supabase
+            .from('users')
+            .insert({
+              auth_user_id: userData.user.id,
+              email: userData.user.email || email,
+              first_name: 'User',
+              last_name: 'Name',
+              role: email.includes('admin') ? 'admin' : 'member'
+            });
+
+          if (createError) {
+            console.error('❌ Profile creation error:', createError);
+            setError('Could not create user profile');
+            return;
+          }
+
+          // Retry getting profile
+          const { data: newProfile } = await supabase
+            .from('users')
+            .select('*')
+            .eq('auth_user_id', userData.user.id)
+            .single();
+
+          if (newProfile) {
+            redirectByUserRole(newProfile.role);
+          } else {
+            setError('Could not fetch user profile');
+          }
           return;
         }
 
-        // Retry getting profile
-        const { data: newProfile } = await supabase
-          .from('users')
-          .select('*')
-          .eq('auth_user_id', data.user.id)
-          .single();
-
-        if (newProfile) {
-          console.log('✅ Profile created and fetched:', newProfile.role);
-          redirectByRole(newProfile.role);
+        if (userProfile) {
+          redirectByUserRole(userProfile.role);
         } else {
-          setError('Could not fetch user profile');
+          setError('User profile not found');
         }
         return;
       }
 
-      if (!userProfile) {
-        console.error('❌ No user profile found');
-        setError('User profile not found');
+      // Step 2: If regular login failed, try branch credentials
+      console.log('📝 Regular login failed, trying branch credentials...');
+      console.log('🏢 Attempting branch staff login...');
+      
+      // FIXED: Correct parameter names and response handling
+      const { data: branchData, error: branchError } = await supabase.rpc('authenticate_branch_login', {
+        p_branch_email: email,
+        p_password: password  // FIXED: was p_branch_password, now p_password
+      });
+
+      if (branchError) {
+        console.error('❌ Branch login error:', branchError);
+        setError('Invalid email or password');
         return;
       }
 
-      console.log('✅ User profile found:', {
-        email: userProfile.email,
-        role: userProfile.role,
-        name: `${userProfile.first_name} ${userProfile.last_name}`
-      });
+      // FIXED: Function returns array of rows, get first row
+      const result = branchData?.[0];
+      if (!result || !result.success) {
+        console.error('❌ Branch login failed:', result?.error_message || 'Unknown error');
+        setError(result?.error_message || 'Invalid branch credentials');
+        return;
+      }
 
-      // Step 3: Route based on role
-      redirectByRole(userProfile.role);
+      console.log('✅ Branch login successful:', result.branch_data);
+      setLoginType('branch');
+
+      // Store branch session info in localStorage for the staff dashboard
+      const branchInfo = result.branch_data;
+      const sessionData = {
+        sessionToken: result.session_token,
+        branchId: branchInfo.id,
+        branchName: branchInfo.name,
+        branchEmail: email,
+        loginTime: new Date().toISOString(),
+        userType: 'branch_staff'
+      };
+
+      localStorage.setItem('branch_session', JSON.stringify(sessionData));
+      
+      console.log('🚀 Redirecting to branch dashboard for branch:', branchInfo.id);
+
+      // Redirect to staff dashboard with branch ID
+      navigate(`/dashboard/staff/${branchInfo.id}`, {  // ← FIXED PATH
+        replace: true,
+        state: { 
+          authenticated: true, 
+          branchData: branchInfo,
+          sessionToken: result.session_token
+        }
+      });
 
     } catch (err) {
       console.error('❌ Login error:', err);
@@ -116,7 +152,7 @@ const Login = () => {
     }
   };
 
-  const redirectByRole = (role: string) => {
+  const redirectByUserRole = (role: string) => {
     console.log('🚀 Redirecting user with role:', role);
     
     if (role === 'admin') {
@@ -156,7 +192,26 @@ const Login = () => {
               <span className="text-2xl font-bold">FitGym Pro</span>
             </div>
             <CardTitle className="text-2xl">Welcome Back</CardTitle>
-            <p className="text-muted-foreground">Sign in to your account</p>
+            <p className="text-muted-foreground">
+              Sign in to your account or branch dashboard
+            </p>
+            
+            {/* Login Type Indicator */}
+            {loginType && (
+              <div className="flex items-center justify-center gap-2 mt-2">
+                {loginType === 'user' ? (
+                  <>
+                    <User className="h-4 w-4 text-blue-500" />
+                    <span className="text-sm text-blue-500">User Account Login</span>
+                  </>
+                ) : (
+                  <>
+                    <Building2 className="h-4 w-4 text-green-500" />
+                    <span className="text-sm text-green-500">Branch Staff Login</span>
+                  </>
+                )}
+              </div>
+            )}
           </CardHeader>
           <CardContent className="space-y-6">
             <form id="login-form" onSubmit={handleSubmit} className="space-y-4">
@@ -169,7 +224,7 @@ const Login = () => {
                   onChange={(e) => setEmail(e.target.value)}
                   required
                   className="bg-background border-border"
-                  placeholder="Enter your email"
+                  placeholder="Enter your email or branch email"
                 />
               </div>
               
@@ -226,8 +281,15 @@ const Login = () => {
                       onClick={() => fillDemo(account.email, account.password)}
                       className="flex-1 justify-start text-xs"
                     >
-                      <span className="font-semibold mr-2">{account.role}:</span>
-                      {account.email}
+                      <div className="flex items-center gap-2">
+                        {account.type === 'user' ? (
+                          <User className="h-3 w-3" />
+                        ) : (
+                          <Building2 className="h-3 w-3" />
+                        )}
+                        <span className="font-semibold mr-2">{account.role}:</span>
+                        <span className="truncate">{account.email}</span>
+                      </div>
                     </Button>
                     <Button
                       variant="default"
@@ -241,12 +303,18 @@ const Login = () => {
                   </div>
                 ))}
               </div>
+              
+              <div className="text-center text-xs text-muted-foreground border-t pt-3">
+                <p>💡 <strong>User accounts:</strong> Access admin or member dashboards</p>
+                <p>🏢 <strong>Branch credentials:</strong> Access branch staff dashboard</p>
+              </div>
             </div>
 
             {/* Debug Info (remove in production) */}
             {process.env.NODE_ENV === 'development' && (
-              <div className="text-xs text-muted-foreground text-center">
-                Debug: Check browser console for detailed login logs
+              <div className="text-xs text-muted-foreground text-center space-y-1">
+                <p>Debug: Check browser console for detailed login logs</p>
+                <p>System will try user login first, then branch login if that fails</p>
               </div>
             )}
 

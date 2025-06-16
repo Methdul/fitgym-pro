@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { 
   Building2, 
   Users, 
@@ -26,10 +26,14 @@ import {
   Activity,
   Shield,
   CheckCircle,
-  XCircle
+  XCircle,
+  Key,
+  Eye,
+  EyeOff,
+  Lock
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { db } from '@/lib/supabase';
+import { db, supabase } from '@/lib/supabase';
 
 interface Branch {
   id: string;
@@ -41,6 +45,9 @@ interface Branch {
   member_count: number;
   staff_count: number;
   facilities: string[];
+  branch_email?: string | null;
+  branch_password_hash?: string | null;
+  is_active: boolean;
   created_at: string;
 }
 
@@ -85,17 +92,33 @@ const AdminDashboard = () => {
 
   // Form states
   const [isAddBranchOpen, setIsAddBranchOpen] = useState(false);
+  const [isEditBranchOpen, setIsEditBranchOpen] = useState(false);
   const [isAddPackageOpen, setIsAddPackageOpen] = useState(false);
   const [isAddPartnershipOpen, setIsAddPartnershipOpen] = useState(false);
   const [isAddStaffOpen, setIsAddStaffOpen] = useState(false);
+  const [isAddCredentialsOpen, setIsAddCredentialsOpen] = useState(false);
+  const [isDeleteBranchOpen, setIsDeleteBranchOpen] = useState(false);
 
+  // Selected items for edit/delete
+  const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+
+  // Password visibility states
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  // UPDATED branch form with credentials
   const [branchForm, setBranchForm] = useState({
     name: '',
     address: '',
     phone: '',
     email: '',
     hours: '6:00 AM - 10:00 PM',
-    facilities: [] as string[]
+    facilities: [] as string[],
+    // ADD these new fields:
+    branch_email: '',
+    branch_password: '',
+    confirm_password: ''
   });
 
   const [packageForm, setPackageForm] = useState({
@@ -120,6 +143,12 @@ const AdminDashboard = () => {
     specialization: '',
     experience_years: '',
     certifications: [] as string[]
+  });
+
+  const [credentialsForm, setCredentialsForm] = useState({
+    branch_email: '',
+    branch_password: '',
+    confirm_password: ''
   });
 
   useEffect(() => {
@@ -152,30 +181,138 @@ const AdminDashboard = () => {
     }
   };
 
+  const resetBranchForm = () => {
+    setBranchForm({
+      name: '',
+      address: '',
+      phone: '',
+      email: '',
+      hours: '6:00 AM - 10:00 PM',
+      facilities: [],
+      branch_email: '',
+      branch_password: '',
+      confirm_password: ''
+    });
+  };
+
+  const resetCredentialsForm = () => {
+    setCredentialsForm({
+      branch_email: '',
+      branch_password: '',
+      confirm_password: ''
+    });
+  };
+
+  const validateBranchForm = () => {
+    if (!branchForm.name || !branchForm.address || !branchForm.phone || !branchForm.email) {
+      toast({
+        title: "Validation Error",
+        description: "Please fill in all required fields",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    if (branchForm.branch_email && !branchForm.branch_password) {
+      toast({
+        title: "Validation Error",
+        description: "Branch password is required when branch email is provided",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    if (branchForm.branch_password && branchForm.branch_password !== branchForm.confirm_password) {
+      toast({
+        title: "Validation Error",
+        description: "Passwords do not match",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    if (branchForm.branch_password && branchForm.branch_password.length < 6) {
+      toast({
+        title: "Validation Error",
+        description: "Branch password must be at least 6 characters",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    return true;
+  };
+
+  const validateCredentialsForm = () => {
+    if (!credentialsForm.branch_email || !credentialsForm.branch_password) {
+      toast({
+        title: "Validation Error",
+        description: "Please fill in all credential fields",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    if (credentialsForm.branch_password !== credentialsForm.confirm_password) {
+      toast({
+        title: "Validation Error",
+        description: "Passwords do not match",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    if (credentialsForm.branch_password.length < 6) {
+      toast({
+        title: "Validation Error",
+        description: "Password must be at least 6 characters",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    return true;
+  };
+
   const handleAddBranch = async () => {
+    if (!validateBranchForm()) return;
+
     try {
-      const newBranch = {
-        ...branchForm,
-        facilities: branchForm.facilities.length > 0 ? branchForm.facilities : ['Cardio Area', 'Weight Training']
-      };
+      let result;
       
-      const { data, error } = await db.branches.create(newBranch);
-      
-      if (error) throw error;
+      if (branchForm.branch_email && branchForm.branch_password) {
+        // Use create_branch_with_credentials function
+        const { data, error } = await supabase.rpc('create_branch_with_credentials', {
+          p_name: branchForm.name,
+          p_address: branchForm.address,
+          p_phone: branchForm.phone,
+          p_email: branchForm.email,
+          p_branch_email: branchForm.branch_email,
+          p_branch_password: branchForm.branch_password,
+          p_hours: branchForm.hours,
+          p_facilities: branchForm.facilities.length > 0 ? branchForm.facilities : ['Cardio Area', 'Weight Training']
+        });
+
+        if (error) throw error;
+        result = data;
+      } else {
+        // Use regular branch creation
+        const newBranch = {
+          ...branchForm,
+          facilities: branchForm.facilities.length > 0 ? branchForm.facilities : ['Cardio Area', 'Weight Training']
+        };
+        
+        const { data, error } = await db.branches.create(newBranch);
+        if (error) throw error;
+        result = data;
+      }
 
       toast({
         title: "Branch Added",
         description: `${branchForm.name} has been added successfully`,
       });
 
-      setBranchForm({
-        name: '',
-        address: '',
-        phone: '',
-        email: '',
-        hours: '6:00 AM - 10:00 PM',
-        facilities: []
-      });
+      resetBranchForm();
       setIsAddBranchOpen(false);
       fetchAllData();
     } catch (error) {
@@ -183,6 +320,141 @@ const AdminDashboard = () => {
       toast({
         title: "Error",
         description: "Failed to add branch",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleEditBranch = () => {
+    if (!selectedBranch) return;
+    
+    setBranchForm({
+      name: selectedBranch.name,
+      address: selectedBranch.address,
+      phone: selectedBranch.phone,
+      email: selectedBranch.email,
+      hours: selectedBranch.hours,
+      facilities: selectedBranch.facilities,
+      branch_email: selectedBranch.branch_email || '',
+      branch_password: '',
+      confirm_password: ''
+    });
+    setIsEditBranchOpen(true);
+  };
+
+  const handleUpdateBranch = async () => {
+    if (!selectedBranch || !validateBranchForm()) return;
+
+    try {
+      const updateData: any = {
+        name: branchForm.name,
+        address: branchForm.address,
+        phone: branchForm.phone,
+        email: branchForm.email,
+        hours: branchForm.hours,
+        facilities: branchForm.facilities
+      };
+
+      // If branch email/password provided, update credentials
+      if (branchForm.branch_email) {
+        updateData.branch_email = branchForm.branch_email;
+        
+        if (branchForm.branch_password) {
+          // Hash password on server side via function call
+          const { data, error } = await supabase.rpc('add_branch_credentials', {
+            p_branch_id: selectedBranch.id,
+            p_branch_email: branchForm.branch_email,
+            p_branch_password: branchForm.branch_password
+          });
+
+          if (error) throw error;
+        }
+      }
+
+      const { error } = await db.branches.update(selectedBranch.id, updateData);
+      if (error) throw error;
+
+      toast({
+        title: "Branch Updated",
+        description: `${branchForm.name} has been updated successfully`,
+      });
+
+      resetBranchForm();
+      setSelectedBranch(null);
+      setIsEditBranchOpen(false);
+      fetchAllData();
+    } catch (error) {
+      console.error('Error updating branch:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update branch",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleAddCredentials = async () => {
+    if (!selectedBranch || !validateCredentialsForm()) return;
+
+    try {
+      const { data, error } = await supabase.rpc('add_branch_credentials', {
+        p_branch_id: selectedBranch.id,
+        p_branch_email: credentialsForm.branch_email,
+        p_branch_password: credentialsForm.branch_password
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Credentials Added",
+        description: `Staff login credentials added to ${selectedBranch.name}`,
+      });
+
+      resetCredentialsForm();
+      setSelectedBranch(null);
+      setIsAddCredentialsOpen(false);
+      fetchAllData();
+    } catch (error) {
+      console.error('Error adding credentials:', error);
+      toast({
+        title: "Error",
+        description: "Failed to add credentials",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDeleteBranch = async () => {
+    if (!selectedBranch) return;
+
+    const expectedText = `${selectedBranch.name}delete`;
+    if (deleteConfirmText !== expectedText) {
+      toast({
+        title: "Confirmation Error",
+        description: `Please type "${expectedText}" to confirm deletion`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const { error } = await db.branches.delete(selectedBranch.id);
+      if (error) throw error;
+      
+      toast({
+        title: "Branch Deleted",
+        description: `${selectedBranch.name} has been deleted successfully`,
+      });
+      
+      setSelectedBranch(null);
+      setDeleteConfirmText('');
+      setIsDeleteBranchOpen(false);
+      fetchAllData();
+    } catch (error) {
+      console.error('Error deleting branch:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete branch",
         variant: "destructive",
       });
     }
@@ -286,26 +558,6 @@ const AdminDashboard = () => {
       toast({
         title: "Error",
         description: "Failed to add staff member",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleDeleteBranch = async (id: string) => {
-    try {
-      const { error } = await db.branches.delete(id);
-      if (error) throw error;
-      
-      toast({
-        title: "Branch Deleted",
-        description: "Branch has been deleted successfully",
-      });
-      fetchAllData();
-    } catch (error) {
-      console.error('Error deleting branch:', error);
-      toast({
-        title: "Error",
-        description: "Failed to delete branch",
         variant: "destructive",
       });
     }
@@ -528,32 +780,24 @@ const AdminDashboard = () => {
                     Add Branch
                   </Button>
                 </DialogTrigger>
-                <DialogContent className="max-w-md">
+                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                   <DialogHeader>
                     <DialogTitle>Add New Branch</DialogTitle>
                   </DialogHeader>
                   <div className="space-y-4">
-                    <div>
-                      <Label htmlFor="branchName">Branch Name</Label>
-                      <Input
-                        id="branchName"
-                        value={branchForm.name}
-                        onChange={(e) => setBranchForm(prev => ({ ...prev, name: e.target.value }))}
-                        placeholder="Downtown Branch"
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="branchAddress">Address</Label>
-                      <Textarea
-                        id="branchAddress"
-                        value={branchForm.address}
-                        onChange={(e) => setBranchForm(prev => ({ ...prev, address: e.target.value }))}
-                        placeholder="123 Main St, City, State"
-                      />
-                    </div>
+                    {/* Basic Information */}
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <Label htmlFor="branchPhone">Phone</Label>
+                        <Label htmlFor="branchName">Branch Name *</Label>
+                        <Input
+                          id="branchName"
+                          value={branchForm.name}
+                          onChange={(e) => setBranchForm(prev => ({ ...prev, name: e.target.value }))}
+                          placeholder="Downtown Branch"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="branchPhone">Phone *</Label>
                         <Input
                           id="branchPhone"
                           value={branchForm.phone}
@@ -561,27 +805,114 @@ const AdminDashboard = () => {
                           placeholder="+1 (555) 123-4567"
                         />
                       </div>
+                    </div>
+                    
+                    <div>
+                      <Label htmlFor="branchAddress">Address *</Label>
+                      <Textarea
+                        id="branchAddress"
+                        value={branchForm.address}
+                        onChange={(e) => setBranchForm(prev => ({ ...prev, address: e.target.value }))}
+                        placeholder="123 Main St, City, State"
+                      />
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <Label htmlFor="branchEmail">Email</Label>
+                        <Label htmlFor="branchEmail">Contact Email *</Label>
                         <Input
                           id="branchEmail"
                           value={branchForm.email}
                           onChange={(e) => setBranchForm(prev => ({ ...prev, email: e.target.value }))}
-                          placeholder="branch@gym.com"
+                          placeholder="contact@branch.com"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="branchHours">Operating Hours</Label>
+                        <Input
+                          id="branchHours"
+                          value={branchForm.hours}
+                          onChange={(e) => setBranchForm(prev => ({ ...prev, hours: e.target.value }))}
+                          placeholder="6:00 AM - 10:00 PM"
                         />
                       </div>
                     </div>
-                    <div>
-                      <Label htmlFor="branchHours">Operating Hours</Label>
-                      <Input
-                        id="branchHours"
-                        value={branchForm.hours}
-                        onChange={(e) => setBranchForm(prev => ({ ...prev, hours: e.target.value }))}
-                        placeholder="6:00 AM - 10:00 PM"
-                      />
+
+                    {/* Staff Login Credentials Section */}
+                    <div className="border-t pt-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Lock className="h-4 w-4" />
+                        <Label className="text-sm font-medium">Staff Login Credentials (Optional)</Label>
+                      </div>
+                      <p className="text-sm text-muted-foreground mb-4">
+                        Create email/password for staff to access this branch dashboard
+                      </p>
+                      
+                      <div className="space-y-4">
+                        <div>
+                          <Label htmlFor="branchStaffEmail">Staff Login Email</Label>
+                          <Input
+                            id="branchStaffEmail"
+                            type="email"
+                            value={branchForm.branch_email}
+                            onChange={(e) => setBranchForm(prev => ({ ...prev, branch_email: e.target.value }))}
+                            placeholder="staff@downtown.fitgym.com"
+                          />
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <Label htmlFor="branchStaffPassword">Staff Password</Label>
+                            <div className="relative">
+                              <Input
+                                id="branchStaffPassword"
+                                type={showPassword ? "text" : "password"}
+                                value={branchForm.branch_password}
+                                onChange={(e) => setBranchForm(prev => ({ ...prev, branch_password: e.target.value }))}
+                                placeholder="Min. 6 characters"
+                              />
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="absolute right-0 top-0 h-full px-3"
+                                onClick={() => setShowPassword(!showPassword)}
+                              >
+                                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                              </Button>
+                            </div>
+                          </div>
+                          
+                          <div>
+                            <Label htmlFor="branchConfirmPassword">Confirm Password</Label>
+                            <div className="relative">
+                              <Input
+                                id="branchConfirmPassword"
+                                type={showConfirmPassword ? "text" : "password"}
+                                value={branchForm.confirm_password}
+                                onChange={(e) => setBranchForm(prev => ({ ...prev, confirm_password: e.target.value }))}
+                                placeholder="Confirm password"
+                              />
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="absolute right-0 top-0 h-full px-3"
+                                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                              >
+                                {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
+
                     <div className="flex justify-end gap-2">
-                      <Button variant="outline" onClick={() => setIsAddBranchOpen(false)}>
+                      <Button variant="outline" onClick={() => {
+                        setIsAddBranchOpen(false);
+                        resetBranchForm();
+                      }}>
                         Cancel
                       </Button>
                       <Button onClick={handleAddBranch} disabled={!branchForm.name || !branchForm.address}>
@@ -598,22 +929,45 @@ const AdminDashboard = () => {
                 <Card key={branch.id}>
                   <CardHeader>
                     <CardTitle className="flex items-center justify-between">
-                      {branch.name}
-                      <div className="flex gap-2">
-                        <Button variant="ghost" size="sm">
+                      <span className="truncate">{branch.name}</span>
+                      <div className="flex gap-1">
+                        {!branch.branch_email && (
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => {
+                              setSelectedBranch(branch);
+                              setIsAddCredentialsOpen(true);
+                            }}
+                            title="Add Staff Credentials"
+                          >
+                            <Key className="h-4 w-4 text-orange-500" />
+                          </Button>
+                        )}
+                        <Button 
+                          variant="ghost" 
+                          size="sm"
+                          onClick={() => {
+                            setSelectedBranch(branch);
+                            handleEditBranch();
+                          }}
+                        >
                           <Edit className="h-4 w-4" />
                         </Button>
                         <Button 
                           variant="ghost" 
                           size="sm" 
-                          onClick={() => handleDeleteBranch(branch.id)}
+                          onClick={() => {
+                            setSelectedBranch(branch);
+                            setIsDeleteBranchOpen(true);
+                          }}
                           className="text-red-500 hover:text-red-700"
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
                     </CardTitle>
-                    <CardDescription>{branch.address}</CardDescription>
+                    <CardDescription className="text-xs">{branch.address}</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-2">
                     <div className="flex justify-between text-sm">
@@ -626,14 +980,29 @@ const AdminDashboard = () => {
                     </div>
                     <div className="text-sm">
                       <span className="text-muted-foreground">Hours:</span>
-                      <div>{branch.hours}</div>
+                      <div className="text-xs">{branch.hours}</div>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span>Staff Login:</span>
+                      <Badge variant={branch.branch_email ? "default" : "secondary"} className="text-xs">
+                        {branch.branch_email ? (
+                          <><CheckCircle className="h-3 w-3 mr-1" />Enabled</>
+                        ) : (
+                          <><XCircle className="h-3 w-3 mr-1" />Not Set</>
+                        )}
+                      </Badge>
                     </div>
                     <div className="flex flex-wrap gap-1 mt-2">
-                      {branch.facilities.map((facility, index) => (
+                      {branch.facilities.slice(0, 2).map((facility, index) => (
                         <Badge key={index} variant="secondary" className="text-xs">
                           {facility}
                         </Badge>
                       ))}
+                      {branch.facilities.length > 2 && (
+                        <Badge variant="secondary" className="text-xs">
+                          +{branch.facilities.length - 2} more
+                        </Badge>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -641,6 +1010,7 @@ const AdminDashboard = () => {
             </div>
           </TabsContent>
 
+          {/* Other tabs remain the same... */}
           {/* Packages Tab */}
           <TabsContent value="packages" className="space-y-6">
             <div className="flex items-center justify-between">
@@ -982,6 +1352,270 @@ const AdminDashboard = () => {
             </div>
           </TabsContent>
         </Tabs>
+
+        {/* Edit Branch Dialog */}
+        <Dialog open={isEditBranchOpen} onOpenChange={setIsEditBranchOpen}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Edit Branch - {selectedBranch?.name}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              {/* Basic Information */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="editBranchName">Branch Name *</Label>
+                  <Input
+                    id="editBranchName"
+                    value={branchForm.name}
+                    onChange={(e) => setBranchForm(prev => ({ ...prev, name: e.target.value }))}
+                    placeholder="Downtown Branch"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="editBranchPhone">Phone *</Label>
+                  <Input
+                    id="editBranchPhone"
+                    value={branchForm.phone}
+                    onChange={(e) => setBranchForm(prev => ({ ...prev, phone: e.target.value }))}
+                    placeholder="+1 (555) 123-4567"
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <Label htmlFor="editBranchAddress">Address *</Label>
+                <Textarea
+                  id="editBranchAddress"
+                  value={branchForm.address}
+                  onChange={(e) => setBranchForm(prev => ({ ...prev, address: e.target.value }))}
+                  placeholder="123 Main St, City, State"
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="editBranchEmail">Contact Email *</Label>
+                  <Input
+                    id="editBranchEmail"
+                    value={branchForm.email}
+                    onChange={(e) => setBranchForm(prev => ({ ...prev, email: e.target.value }))}
+                    placeholder="contact@branch.com"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="editBranchHours">Operating Hours</Label>
+                  <Input
+                    id="editBranchHours"
+                    value={branchForm.hours}
+                    onChange={(e) => setBranchForm(prev => ({ ...prev, hours: e.target.value }))}
+                    placeholder="6:00 AM - 10:00 PM"
+                  />
+                </div>
+              </div>
+
+              {/* Staff Login Credentials Section */}
+              <div className="border-t pt-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Lock className="h-4 w-4" />
+                  <Label className="text-sm font-medium">Staff Login Credentials</Label>
+                </div>
+                
+                <div className="space-y-4">
+                  <div>
+                    <Label htmlFor="editBranchStaffEmail">Staff Login Email</Label>
+                    <Input
+                      id="editBranchStaffEmail"
+                      type="email"
+                      value={branchForm.branch_email}
+                      onChange={(e) => setBranchForm(prev => ({ ...prev, branch_email: e.target.value }))}
+                      placeholder="staff@downtown.fitgym.com"
+                    />
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="editBranchStaffPassword">New Password (optional)</Label>
+                      <div className="relative">
+                        <Input
+                          id="editBranchStaffPassword"
+                          type={showPassword ? "text" : "password"}
+                          value={branchForm.branch_password}
+                          onChange={(e) => setBranchForm(prev => ({ ...prev, branch_password: e.target.value }))}
+                          placeholder="Leave empty to keep current"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="absolute right-0 top-0 h-full px-3"
+                          onClick={() => setShowPassword(!showPassword)}
+                        >
+                          {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </Button>
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <Label htmlFor="editBranchConfirmPassword">Confirm New Password</Label>
+                      <div className="relative">
+                        <Input
+                          id="editBranchConfirmPassword"
+                          type={showConfirmPassword ? "text" : "password"}
+                          value={branchForm.confirm_password}
+                          onChange={(e) => setBranchForm(prev => ({ ...prev, confirm_password: e.target.value }))}
+                          placeholder="Confirm new password"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="absolute right-0 top-0 h-full px-3"
+                          onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        >
+                          {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => {
+                  setIsEditBranchOpen(false);
+                  setSelectedBranch(null);
+                  resetBranchForm();
+                }}>
+                  Cancel
+                </Button>
+                <Button onClick={handleUpdateBranch} disabled={!branchForm.name || !branchForm.address}>
+                  Update Branch
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add Credentials Dialog */}
+        <Dialog open={isAddCredentialsOpen} onOpenChange={setIsAddCredentialsOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Add Staff Credentials - {selectedBranch?.name}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Create email/password for staff to access this branch dashboard
+              </p>
+              
+              <div>
+                <Label htmlFor="credentialsEmail">Staff Login Email *</Label>
+                <Input
+                  id="credentialsEmail"
+                  type="email"
+                  value={credentialsForm.branch_email}
+                  onChange={(e) => setCredentialsForm(prev => ({ ...prev, branch_email: e.target.value }))}
+                  placeholder="staff@branch.fitgym.com"
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="credentialsPassword">Password *</Label>
+                  <div className="relative">
+                    <Input
+                      id="credentialsPassword"
+                      type={showPassword ? "text" : "password"}
+                      value={credentialsForm.branch_password}
+                      onChange={(e) => setCredentialsForm(prev => ({ ...prev, branch_password: e.target.value }))}
+                      placeholder="Min. 6 characters"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-0 top-0 h-full px-3"
+                      onClick={() => setShowPassword(!showPassword)}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                </div>
+                
+                <div>
+                  <Label htmlFor="credentialsConfirmPassword">Confirm Password *</Label>
+                  <div className="relative">
+                    <Input
+                      id="credentialsConfirmPassword"
+                      type={showConfirmPassword ? "text" : "password"}
+                      value={credentialsForm.confirm_password}
+                      onChange={(e) => setCredentialsForm(prev => ({ ...prev, confirm_password: e.target.value }))}
+                      placeholder="Confirm password"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-0 top-0 h-full px-3"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    >
+                      {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => {
+                  setIsAddCredentialsOpen(false);
+                  setSelectedBranch(null);
+                  resetCredentialsForm();
+                }}>
+                  Cancel
+                </Button>
+                <Button onClick={handleAddCredentials} disabled={!credentialsForm.branch_email || !credentialsForm.branch_password}>
+                  Add Credentials
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Branch Dialog */}
+        <AlertDialog open={isDeleteBranchOpen} onOpenChange={setIsDeleteBranchOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Branch</AlertDialogTitle>
+              <AlertDialogDescription>
+                This action cannot be undone. This will permanently delete the branch "{selectedBranch?.name}" and all associated data.
+                <br /><br />
+                <strong>To confirm deletion, type: "{selectedBranch?.name}delete"</strong>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="py-4">
+              <Input
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                placeholder={`Type "${selectedBranch?.name}delete" to confirm`}
+              />
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => {
+                setIsDeleteBranchOpen(false);
+                setSelectedBranch(null);
+                setDeleteConfirmText('');
+              }}>
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDeleteBranch}
+                className="bg-red-600 hover:bg-red-700"
+                disabled={deleteConfirmText !== `${selectedBranch?.name}delete`}
+              >
+                Delete Branch
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   );

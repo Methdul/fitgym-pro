@@ -1,6 +1,5 @@
-
 import { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -26,7 +25,8 @@ import {
   UserPlus,
   CheckCircle,
   Clock,
-  Settings
+  Settings,
+  Building2
 } from 'lucide-react';
 import { db } from '@/lib/supabase';
 import { AddNewMemberModal } from '@/components/staff/AddNewMemberModal';
@@ -39,6 +39,7 @@ import type { Branch, Member, BranchStaff } from '@/types';
 
 const StaffDashboard = () => {
   const { branchId } = useParams();
+  const location = useLocation();
   const [branch, setBranch] = useState<Branch | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [staff, setStaff] = useState<BranchStaff[]>([]);
@@ -53,6 +54,55 @@ const StaffDashboard = () => {
   const [showRenewMember, setShowRenewMember] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(true);
   const [authenticatedStaff, setAuthenticatedStaff] = useState<any>(null);
+  const [loginMethod, setLoginMethod] = useState<'pin' | 'credentials' | null>(null);
+
+  useEffect(() => {
+    // Check if user came from branch credential login
+    const branchSession = localStorage.getItem('branch_session');
+    const locationState = location.state;
+    
+    if (branchSession) {
+      try {
+        const sessionData = JSON.parse(branchSession);
+        console.log('🏢 Found branch session:', sessionData);
+        
+        if (sessionData.branchId === branchId && sessionData.userType === 'branch_staff') {
+          // Auto-authenticate with branch credentials
+          setAuthenticatedStaff({
+            id: 'branch_staff',
+            first_name: 'Branch',
+            last_name: 'Staff',
+            role: 'manager', // Branch credential users get manager level access
+            branch_id: branchId,
+            email: sessionData.branchEmail,
+            login_method: 'credentials'
+          });
+          setLoginMethod('credentials');
+          setShowAuthModal(false);
+          console.log('✅ Auto-authenticated via branch credentials');
+        }
+      } catch (error) {
+        console.error('❌ Error parsing branch session:', error);
+        localStorage.removeItem('branch_session'); // Clear invalid session
+      }
+    }
+    
+    // Also check location state from navigation
+    if (locationState?.authenticated && locationState?.branchData) {
+      console.log('🚀 Authenticated via navigation state');
+      setAuthenticatedStaff({
+        id: 'branch_staff',
+        first_name: 'Branch',
+        last_name: 'Staff',
+        role: 'manager',
+        branch_id: branchId,
+        email: locationState.branchData.branch_email,
+        login_method: 'credentials'
+      });
+      setLoginMethod('credentials');
+      setShowAuthModal(false);
+    }
+  }, [branchId, location.state]);
 
   useEffect(() => {
     if (authenticatedStaff && branchId) {
@@ -169,7 +219,21 @@ const StaffDashboard = () => {
 
   const handleAuthentication = (staff: any) => {
     setAuthenticatedStaff(staff);
+    setLoginMethod('pin');
     setShowAuthModal(false);
+  };
+
+  const handleLogout = () => {
+    // Clear branch session if exists
+    localStorage.removeItem('branch_session');
+    
+    // Reset authentication state
+    setAuthenticatedStaff(null);
+    setLoginMethod(null);
+    setShowAuthModal(true);
+    
+    // Navigate back to login
+    window.location.href = '/login';
   };
 
   const stats = getStatsData();
@@ -187,6 +251,13 @@ const StaffDashboard = () => {
           <Shield className="h-12 w-12 mx-auto mb-4 text-primary" />
           <h2 className="text-2xl font-bold mb-2">Staff Authentication Required</h2>
           <p className="text-muted-foreground">Please authenticate to access the staff dashboard</p>
+          <Button 
+            variant="outline" 
+            className="mt-4"
+            onClick={() => window.location.href = '/login'}
+          >
+            ← Back to Login
+          </Button>
         </div>
       </div>
     );
@@ -231,27 +302,70 @@ const StaffDashboard = () => {
           </div>
           <div className="text-right">
             <div className="flex items-center space-x-2">
-              <Crown className="h-4 w-4 text-yellow-500" />
+              {loginMethod === 'credentials' ? (
+                <Building2 className="h-4 w-4 text-green-500" />
+              ) : (
+                <Crown className="h-4 w-4 text-yellow-500" />
+              )}
               <span className="font-medium">
                 {authenticatedStaff?.first_name} {authenticatedStaff?.last_name}
               </span>
             </div>
-            <p className="text-sm text-muted-foreground">
-              {authenticatedStaff?.role?.replace('_', ' ')} • Just now
-            </p>
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              onClick={() => {
-                setAuthenticatedStaff(null);
-                setShowAuthModal(true);
-              }}
-              className="mt-1"
-            >
-              Switch User
-            </Button>
+            {/* FIXED: Changed from <p> to <div> to fix DOM nesting warning */}
+            <div className="text-sm text-muted-foreground">
+              {loginMethod === 'credentials' ? (
+                <>
+                  <Badge variant="outline" className="text-xs border-green-500 text-green-500">
+                    Branch Login
+                  </Badge>
+                  <span className="ml-2">Manager Access</span>
+                </>
+              ) : (
+                <>
+                  {authenticatedStaff?.role?.replace('_', ' ')} • PIN Auth
+                </>
+              )}
+            </div>
+            <div className="flex gap-2 mt-1">
+              {loginMethod === 'pin' && (
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => {
+                    setAuthenticatedStaff(null);
+                    setShowAuthModal(true);
+                  }}
+                >
+                  Switch User
+                </Button>
+              )}
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={handleLogout}
+              >
+                Logout
+              </Button>
+            </div>
           </div>
         </div>
+
+        {/* Authentication Method Notice */}
+        {loginMethod === 'credentials' && (
+          <Card className="border-green-500/20 bg-green-500/5">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2">
+                <Building2 className="h-4 w-4 text-green-500" />
+                <span className="text-sm font-medium text-green-700">
+                  Authenticated via Branch Credentials
+                </span>
+                <Badge variant="outline" className="text-xs border-green-500 text-green-500">
+                  Manager Access
+                </Badge>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
