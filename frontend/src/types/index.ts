@@ -67,14 +67,19 @@ export interface Member {
 
 export interface Package {
   id: string;
+  branch_id: string; // ADD THIS LINE
   name: string;
-  type: PackageType;
+  type: 'individual' | 'couple';
   price: number;
   duration_months: number;
   features: string[];
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  // Optional populated field when joining with branches table
+  branches?: {
+    name: string;
+  };
 }
 
 export interface MemberRenewal {

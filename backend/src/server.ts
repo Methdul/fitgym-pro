@@ -4,11 +4,13 @@ import dotenv from 'dotenv';
 import helmet from 'helmet';
 import morgan from 'morgan';
 
-// Import routes (including the new member and package routes)
+// Import routes (including the updated package routes)
 import { authRoutes } from './routes/auth';
 import { staffRoutes } from './routes/staff';
 import { memberRoutes } from './routes/members';
 import { packageRoutes } from './routes/packages';
+import { branchRoutes } from './routes/branches';
+import { renewalRoutes } from './routes/renewals';
 
 // Load environment variables
 dotenv.config();
@@ -42,13 +44,15 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// API Routes - ENHANCED WITH MEMBER AND PACKAGE ROUTES
+// API Routes - ENHANCED WITH ALL ROUTES INCLUDING BRANCH-SPECIFIC PACKAGES
 console.log('🔧 Registering API routes...');
 app.use('/api/auth', authRoutes);
 app.use('/api/staff', staffRoutes);
 app.use('/api/members', memberRoutes);
-app.use('/api/packages', packageRoutes);
-console.log('✅ Routes registered: /api/auth, /api/staff, /api/members, /api/packages');
+app.use('/api/packages', packageRoutes); // Now supports branch-specific packages
+app.use('/api/branches', branchRoutes);
+app.use('/api/renewals', renewalRoutes);
+console.log('✅ Routes registered: /api/auth, /api/staff, /api/members, /api/packages, /api/branches, /api/renewals');
 
 // Test endpoint for debugging
 app.get('/api/test', (req, res) => {
@@ -61,6 +65,8 @@ app.get('/api/test', (req, res) => {
       '--- AUTH ROUTES ---',
       'POST /api/auth/signin',
       'POST /api/auth/signup',
+      'GET /api/auth/profile',
+      'POST /api/auth/reset-password',
       '--- STAFF ROUTES ---',
       'GET /api/staff/branch/:branchId',
       'POST /api/staff/verify-pin',
@@ -77,13 +83,23 @@ app.get('/api/test', (req, res) => {
       'DELETE /api/members/:id',
       'GET /api/members/:id',
       'GET /api/members/search/:branchId',
-      '--- PACKAGE ROUTES ---',
-      'GET /api/packages/active',
-      'GET /api/packages',
+      '--- PACKAGE ROUTES (BRANCH-SPECIFIC) ---',
+      'GET /api/packages/branch/:branchId',
+      'GET /api/packages/branch/:branchId/active',
+      'GET /api/packages/active (admin only)',
+      'GET /api/packages (admin only)',
       'POST /api/packages',
       'PUT /api/packages/:id',
       'DELETE /api/packages/:id',
-      'GET /api/packages/:id'
+      'GET /api/packages/:id',
+      '--- BRANCH ROUTES ---',
+      'GET /api/branches',
+      'GET /api/branches/:id',
+      '--- RENEWAL ROUTES ---',
+      'POST /api/renewals/process',
+      'GET /api/renewals/member/:memberId',
+      'GET /api/renewals/recent/:branchId',
+      'GET /api/renewals/eligibility/:memberId'
     ]
   });
 });
@@ -118,6 +134,7 @@ app.listen(PORT, () => {
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🌐 API Health: http://localhost:${PORT}/api/health`);
   console.log(`🔐 Authentication: Enhanced with Supabase`);
+  console.log(`📦 Packages: Branch-specific management enabled`);
   console.log(`🧪 Test routes: http://localhost:${PORT}/api/test`);
 });
 

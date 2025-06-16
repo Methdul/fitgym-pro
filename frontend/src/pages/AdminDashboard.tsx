@@ -13,7 +13,6 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { 
   Building2, 
   Users, 
-  Package, 
   Heart, 
   UserPlus, 
   Plus, 
@@ -51,16 +50,6 @@ interface Branch {
   created_at: string;
 }
 
-interface Package {
-  id: string;
-  name: string;
-  type: string;
-  price: number;
-  duration_months: number;
-  features: string[];
-  is_active: boolean;
-}
-
 interface Partnership {
   id: string;
   name: string;
@@ -83,7 +72,6 @@ interface GymStaff {
 
 const AdminDashboard = () => {
   const [branches, setBranches] = useState<Branch[]>([]);
-  const [packages, setPackages] = useState<Package[]>([]);
   const [partnerships, setPartnerships] = useState<Partnership[]>([]);
   const [gymStaff, setGymStaff] = useState<GymStaff[]>([]);
   const [loading, setLoading] = useState(true);
@@ -93,7 +81,6 @@ const AdminDashboard = () => {
   // Form states
   const [isAddBranchOpen, setIsAddBranchOpen] = useState(false);
   const [isEditBranchOpen, setIsEditBranchOpen] = useState(false);
-  const [isAddPackageOpen, setIsAddPackageOpen] = useState(false);
   const [isAddPartnershipOpen, setIsAddPartnershipOpen] = useState(false);
   const [isAddStaffOpen, setIsAddStaffOpen] = useState(false);
   const [isAddCredentialsOpen, setIsAddCredentialsOpen] = useState(false);
@@ -119,14 +106,6 @@ const AdminDashboard = () => {
     branch_email: '',
     branch_password: '',
     confirm_password: ''
-  });
-
-  const [packageForm, setPackageForm] = useState({
-    name: '',
-    type: 'individual',
-    price: '',
-    duration_months: '',
-    features: [] as string[]
   });
 
   const [partnershipForm, setPartnershipForm] = useState({
@@ -158,15 +137,13 @@ const AdminDashboard = () => {
   const fetchAllData = async () => {
     setLoading(true);
     try {
-      const [branchesData, packagesData, partnershipsData, staffData] = await Promise.all([
+      const [branchesData, partnershipsData, staffData] = await Promise.all([
         db.branches.getAll(),
-        db.packages.getAll(),
         db.partnerships.getAll(),
         db.gymStaff.getDisplayed()
       ]);
 
       setBranches(branchesData.data || []);
-      setPackages(packagesData.data || []);
       setPartnerships(partnershipsData.data || []);
       setGymStaff(staffData.data || []);
     } catch (error) {
@@ -460,43 +437,6 @@ const AdminDashboard = () => {
     }
   };
 
-  const handleAddPackage = async () => {
-    try {
-      const newPackage = {
-        ...packageForm,
-        price: parseFloat(packageForm.price),
-        duration_months: parseInt(packageForm.duration_months),
-        features: packageForm.features.length > 0 ? packageForm.features : ['Gym Access', 'Locker Room']
-      };
-      
-      const { data, error } = await db.packages.create(newPackage);
-      
-      if (error) throw error;
-
-      toast({
-        title: "Package Added",
-        description: `${packageForm.name} has been added successfully`,
-      });
-
-      setPackageForm({
-        name: '',
-        type: 'individual',
-        price: '',
-        duration_months: '',
-        features: []
-      });
-      setIsAddPackageOpen(false);
-      fetchAllData();
-    } catch (error) {
-      console.error('Error adding package:', error);
-      toast({
-        title: "Error",
-        description: "Failed to add package",
-        variant: "destructive",
-      });
-    }
-  };
-
   const handleAddPartnership = async () => {
     try {
       const { data, error } = await db.partnerships.create(partnershipForm);
@@ -558,26 +498,6 @@ const AdminDashboard = () => {
       toast({
         title: "Error",
         description: "Failed to add staff member",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleTogglePackageStatus = async (id: string, currentStatus: boolean) => {
-    try {
-      const { error } = await db.packages.update(id, { is_active: !currentStatus });
-      if (error) throw error;
-      
-      toast({
-        title: "Package Updated",
-        description: `Package ${!currentStatus ? 'activated' : 'deactivated'} successfully`,
-      });
-      fetchAllData();
-    } catch (error) {
-      console.error('Error updating package:', error);
-      toast({
-        title: "Error",
-        description: "Failed to update package",
         variant: "destructive",
       });
     }
@@ -681,15 +601,15 @@ const AdminDashboard = () => {
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Active Packages</CardTitle>
-              <Package className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-sm font-medium">Total Staff</CardTitle>
+              <UserPlus className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {packages.filter(p => p.is_active).length}
+                {branches.reduce((sum, branch) => sum + branch.staff_count, 0)}
               </div>
               <p className="text-xs text-muted-foreground">
-                Available membership plans
+                Branch staff members
               </p>
             </CardContent>
           </Card>
@@ -712,10 +632,9 @@ const AdminDashboard = () => {
 
         {/* Main Content */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="branches">Branches</TabsTrigger>
-            <TabsTrigger value="packages">Packages</TabsTrigger>
             <TabsTrigger value="partnerships">Partnerships</TabsTrigger>
             <TabsTrigger value="staff">Staff</TabsTrigger>
           </TabsList>
@@ -756,17 +675,32 @@ const AdminDashboard = () => {
                     <Building2 className="h-4 w-4 mr-2" />
                     Manage Branches
                   </Button>
-                  <Button className="w-full justify-start" variant="outline" onClick={() => setActiveTab('packages')}>
-                    <Package className="h-4 w-4 mr-2" />
-                    Manage Packages
-                  </Button>
                   <Button className="w-full justify-start" variant="outline" onClick={() => setActiveTab('partnerships')}>
                     <Heart className="h-4 w-4 mr-2" />
                     Manage Partnerships
                   </Button>
+                  <Button className="w-full justify-start" variant="outline" onClick={() => setActiveTab('staff')}>
+                    <UserPlus className="h-4 w-4 mr-2" />
+                    Manage Staff
+                  </Button>
                 </CardContent>
               </Card>
             </div>
+
+            {/* Packages Note */}
+            <Card className="border-blue-500/20 bg-blue-500/5">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2">
+                  <Building2 className="h-4 w-4 text-blue-500" />
+                  <span className="text-sm font-medium text-blue-700">
+                    Package Management
+                  </span>
+                </div>
+                <p className="text-sm text-blue-600 mt-1">
+                  Packages are now managed at the branch level. Each branch can create and manage their own membership packages through their Staff Dashboard.
+                </p>
+              </CardContent>
+            </Card>
           </TabsContent>
 
           {/* Branches Tab */}
@@ -1003,122 +937,6 @@ const AdminDashboard = () => {
                           +{branch.facilities.length - 2} more
                         </Badge>
                       )}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </TabsContent>
-
-          {/* Other tabs remain the same... */}
-          {/* Packages Tab */}
-          <TabsContent value="packages" className="space-y-6">
-            <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-bold">Package Management</h2>
-              <Dialog open={isAddPackageOpen} onOpenChange={setIsAddPackageOpen}>
-                <DialogTrigger asChild>
-                  <Button>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Package
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-md">
-                  <DialogHeader>
-                    <DialogTitle>Add New Package</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-4">
-                    <div>
-                      <Label htmlFor="packageName">Package Name</Label>
-                      <Input
-                        id="packageName"
-                        value={packageForm.name}
-                        onChange={(e) => setPackageForm(prev => ({ ...prev, name: e.target.value }))}
-                        placeholder="Premium Monthly"
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <Label htmlFor="packageType">Type</Label>
-                        <Select value={packageForm.type} onValueChange={(value) => setPackageForm(prev => ({ ...prev, type: value }))}>
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="individual">Individual</SelectItem>
-                            <SelectItem value="couple">Couple</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label htmlFor="packagePrice">Price ($)</Label>
-                        <Input
-                          id="packagePrice"
-                          type="number"
-                          value={packageForm.price}
-                          onChange={(e) => setPackageForm(prev => ({ ...prev, price: e.target.value }))}
-                          placeholder="49.99"
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <Label htmlFor="packageDuration">Duration (months)</Label>
-                      <Input
-                        id="packageDuration"
-                        type="number"
-                        value={packageForm.duration_months}
-                        onChange={(e) => setPackageForm(prev => ({ ...prev, duration_months: e.target.value }))}
-                        placeholder="1"
-                      />
-                    </div>
-                    <div className="flex justify-end gap-2">
-                      <Button variant="outline" onClick={() => setIsAddPackageOpen(false)}>
-                        Cancel
-                      </Button>
-                      <Button onClick={handleAddPackage} disabled={!packageForm.name || !packageForm.price || !packageForm.duration_months}>
-                        Add Package
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {packages.map((pkg) => (
-                <Card key={pkg.id}>
-                  <CardHeader>
-                    <CardTitle className="flex items-center justify-between">
-                      {pkg.name}
-                      <div className="flex items-center gap-2">
-                        <Switch
-                          checked={pkg.is_active}
-                          onCheckedChange={() => handleTogglePackageStatus(pkg.id, pkg.is_active)}
-                        />
-                        <Badge variant={pkg.is_active ? "default" : "secondary"}>
-                          {pkg.is_active ? <CheckCircle className="h-3 w-3 mr-1" /> : <XCircle className="h-3 w-3 mr-1" />}
-                          {pkg.is_active ? "Active" : "Inactive"}
-                        </Badge>
-                      </div>
-                    </CardTitle>
-                    <CardDescription className="text-2xl font-bold text-primary">
-                      ${pkg.price}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span>Type:</span>
-                      <span className="font-semibold capitalize">{pkg.type}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span>Duration:</span>
-                      <span className="font-semibold">{pkg.duration_months} month{pkg.duration_months > 1 ? 's' : ''}</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1 mt-2">
-                      {pkg.features.map((feature, index) => (
-                        <Badge key={index} variant="outline" className="text-xs">
-                          {feature}
-                        </Badge>
-                      ))}
                     </div>
                   </CardContent>
                 </Card>

@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -74,12 +73,29 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
     }
   }, [selectedPackage]);
 
+  // UPDATED: Fetch branch-specific packages instead of all packages
   const fetchPackages = async () => {
     try {
-      const { data } = await db.packages.getAll();
-      if (data) setPackages(data);
+      console.log(`🔄 Fetching packages for branch: ${branchId}`);
+      
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/branch/${branchId}/active`);
+      const result = await response.json();
+      
+      if (result.status === 'success') {
+        console.log(`✅ Found ${result.data?.length || 0} active packages for branch`);
+        setPackages(result.data || []);
+      } else {
+        console.error('❌ Failed to fetch packages:', result.error);
+        throw new Error(result.error || 'Failed to fetch packages');
+      }
     } catch (error) {
-      console.error('Error fetching packages:', error);
+      console.error('Error fetching branch packages:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load packages for this branch",
+        variant: "destructive",
+      });
+      setPackages([]); // Set empty array on error
     }
   };
 
@@ -324,39 +340,58 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
       case 'package':
         return (
           <div className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {packages.map((pkg) => (
-                <Card 
-                  key={pkg.id} 
-                  className={`cursor-pointer transition-colors ${
-                    selectedPackage?.id === pkg.id 
-                      ? 'border-primary bg-primary/5' 
-                      : 'border-border hover:border-primary/50'
-                  }`}
-                  onClick={() => setSelectedPackage(pkg)}
-                >
-                  <CardHeader className="pb-2">
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-lg">{pkg.name}</CardTitle>
-                      <Badge variant={pkg.type === 'couple' ? 'secondary' : 'default'}>
-                        {pkg.type}
-                      </Badge>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2">
-                      <p className="text-2xl font-bold text-primary">${pkg.price}</p>
-                      <p className="text-sm text-muted-foreground">{pkg.duration_months} month(s)</p>
-                      <div className="space-y-1">
-                        {pkg.features.map((feature, index) => (
-                          <p key={index} className="text-xs text-muted-foreground">• {feature}</p>
-                        ))}
+            {/* Show loading state while fetching packages */}
+            {packages.length === 0 ? (
+              <div className="text-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+                <p className="text-muted-foreground">Loading available packages...</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {packages.map((pkg) => (
+                  <Card 
+                    key={pkg.id} 
+                    className={`cursor-pointer transition-colors ${
+                      selectedPackage?.id === pkg.id 
+                        ? 'border-primary bg-primary/5' 
+                        : 'border-border hover:border-primary/50'
+                    }`}
+                    onClick={() => setSelectedPackage(pkg)}
+                  >
+                    <CardHeader className="pb-2">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-lg">{pkg.name}</CardTitle>
+                        <Badge variant={pkg.type === 'couple' ? 'secondary' : 'default'}>
+                          {pkg.type}
+                        </Badge>
                       </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2">
+                        <p className="text-2xl font-bold text-primary">${pkg.price}</p>
+                        <p className="text-sm text-muted-foreground">{pkg.duration_months} month(s)</p>
+                        <div className="space-y-1">
+                          {pkg.features.map((feature, index) => (
+                            <p key={index} className="text-xs text-muted-foreground">• {feature}</p>
+                          ))}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+            
+            {/* Show message if no packages available */}
+            {packages.length === 0 && (
+              <Card className="border-yellow-500/20 bg-yellow-500/5">
+                <CardContent className="p-4 text-center">
+                  <p className="text-sm text-yellow-700">
+                    No active packages available for this branch. Please contact an administrator to add packages.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
           </div>
         );
 
@@ -557,11 +592,11 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
               Back
             </Button>
             {currentStep === 'verification' ? (
-              <Button onClick={handleSubmit} disabled={loading} className="flex-1">
+              <Button onClick={handleSubmit} disabled={loading || packages.length === 0} className="flex-1">
                 {loading ? 'Creating Member...' : 'Create Member'}
               </Button>
             ) : (
-              <Button onClick={handleNext} className="flex-1">
+              <Button onClick={handleNext} disabled={currentStep === 'package' && packages.length === 0} className="flex-1">
                 Next
               </Button>
             )}

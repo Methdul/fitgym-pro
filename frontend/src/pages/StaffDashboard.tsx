@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { 
   ArrowLeft, 
@@ -26,7 +29,10 @@ import {
   CheckCircle,
   Settings,
   Building2,
-  Trash2
+  Trash2,
+  Package as PackageIcon,
+  XCircle,
+  Edit
 } from 'lucide-react';
 import { db } from '@/lib/supabase';
 import { AddNewMemberModal } from '@/components/staff/AddNewMemberModal';
@@ -35,14 +41,17 @@ import { ViewMemberModal } from '@/components/staff/ViewMemberModal';
 import RenewMemberModal from '@/components/staff/RenewMemberModal';
 import { StaffManagement } from '@/components/staff/StaffManagement';
 import StaffAuthModal from '@/components/staff/StaffAuthModal';
-import type { Branch, Member, BranchStaff } from '@/types';
+import { useToast } from '@/hooks/use-toast';
+import type { Branch, Member, BranchStaff, Package } from '@/types';
 
 const StaffDashboard = () => {
   const { branchId } = useParams();
   const location = useLocation();
+  const { toast } = useToast();
   const [branch, setBranch] = useState<Branch | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [staff, setStaff] = useState<BranchStaff[]>([]);
+  const [packages, setPackages] = useState<Package[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -56,6 +65,18 @@ const StaffDashboard = () => {
   const [loginMethod, setLoginMethod] = useState<'pin' | 'credentials' | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [memberToDelete, setMemberToDelete] = useState<Member | null>(null);
+
+  // Package management states
+  const [isAddPackageOpen, setIsAddPackageOpen] = useState(false);
+  const [isEditPackageOpen, setIsEditPackageOpen] = useState(false);
+  const [selectedPackage, setSelectedPackage] = useState<Package | null>(null);
+  const [packageForm, setPackageForm] = useState({
+    name: '',
+    type: 'individual',
+    price: '',
+    duration_months: '',
+    features: [] as string[]
+  });
 
   // Helper function to get the ACTUAL status of a member based on expiry date
   const getActualMemberStatus = (member: Member) => {
@@ -152,19 +173,37 @@ const StaffDashboard = () => {
     if (!branchId) return;
     
     try {
-      const [branchData, membersData, staffData] = await Promise.all([
+      const [branchData, membersData, staffData, packagesData] = await Promise.all([
         db.branches.getById(branchId),
         db.members.getByBranch(branchId),
-        db.staff.getByBranch(branchId)
+        db.staff.getByBranch(branchId),
+        fetchBranchPackages(branchId)
       ]);
 
       if (branchData.data) setBranch(branchData.data);
       if (membersData.data) setMembers(membersData.data);
       if (staffData.data) setStaff(staffData.data);
+      if (packagesData.data) setPackages(packagesData.data);
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchBranchPackages = async (branchId: string) => {
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/branch/${branchId}`);
+      const result = await response.json();
+      
+      if (result.status === 'success') {
+        return { data: result.data, error: null };
+      } else {
+        return { data: null, error: result.error };
+      }
+    } catch (error) {
+      console.error('Error fetching branch packages:', error);
+      return { data: null, error: 'Failed to fetch packages' };
     }
   };
 
@@ -202,6 +241,8 @@ const StaffDashboard = () => {
       expiredMembers,
       expiringMembers,
       totalStaff: staff.length,
+      totalPackages: packages.length,
+      activePackages: packages.filter(p => p.is_active).length,
       monthlyRevenue,
       newMembersThisMonth,
       retentionRate,
@@ -348,6 +389,232 @@ const StaffDashboard = () => {
     
     // Navigate back to login
     window.location.href = '/login';
+  };
+
+  // Package management functions
+  const resetPackageForm = () => {
+    setPackageForm({
+      name: '',
+      type: 'individual',
+      price: '',
+      duration_months: '',
+      features: []
+    });
+  };
+
+  const validatePackageForm = () => {
+    if (!packageForm.name.trim()) {
+      toast({
+        title: "Validation Error",
+        description: "Package name is required",
+        variant: "destructive",
+      });
+      return false;
+    }
+    if (!packageForm.price || parseFloat(packageForm.price) < 0) {
+      toast({
+        title: "Validation Error",
+        description: "Valid price is required",
+        variant: "destructive",
+      });
+      return false;
+    }
+    if (!packageForm.duration_months || parseInt(packageForm.duration_months) < 1) {
+      toast({
+        title: "Validation Error",
+        description: "Duration must be at least 1 month",
+        variant: "destructive",
+      });
+      return false;
+    }
+    return true;
+  };
+
+  const handleAddPackage = async () => {
+    if (!validatePackageForm() || !branchId) return;
+
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          branch_id: branchId,
+          name: packageForm.name,
+          type: packageForm.type,
+          price: parseFloat(packageForm.price),
+          duration_months: parseInt(packageForm.duration_months),
+          features: packageForm.features.length > 0 ? packageForm.features : ['Gym Access', 'Locker Room']
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || result.status !== 'success') {
+        throw new Error(result.error || 'Failed to create package');
+      }
+
+      toast({
+        title: "Package Added",
+        description: `${packageForm.name} has been added successfully`,
+      });
+
+      resetPackageForm();
+      setIsAddPackageOpen(false);
+      
+      // Refresh packages
+      const packagesData = await fetchBranchPackages(branchId);
+      if (packagesData.data) setPackages(packagesData.data);
+
+    } catch (error) {
+      console.error('Error adding package:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to add package",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleEditPackage = (pkg: Package) => {
+    setSelectedPackage(pkg);
+    setPackageForm({
+      name: pkg.name,
+      type: pkg.type,
+      price: pkg.price.toString(),
+      duration_months: pkg.duration_months.toString(),
+      features: pkg.features
+    });
+    setIsEditPackageOpen(true);
+  };
+
+  const handleUpdatePackage = async () => {
+    if (!validatePackageForm() || !selectedPackage) return;
+
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/${selectedPackage.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: packageForm.name,
+          type: packageForm.type,
+          price: parseFloat(packageForm.price),
+          duration_months: parseInt(packageForm.duration_months),
+          features: packageForm.features
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || result.status !== 'success') {
+        throw new Error(result.error || 'Failed to update package');
+      }
+
+      toast({
+        title: "Package Updated",
+        description: `${packageForm.name} has been updated successfully`,
+      });
+
+      resetPackageForm();
+      setSelectedPackage(null);
+      setIsEditPackageOpen(false);
+      
+      // Refresh packages
+      if (branchId) {
+        const packagesData = await fetchBranchPackages(branchId);
+        if (packagesData.data) setPackages(packagesData.data);
+      }
+
+    } catch (error) {
+      console.error('Error updating package:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to update package",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleTogglePackageStatus = async (id: string, currentStatus: boolean) => {
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          is_active: !currentStatus
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || result.status !== 'success') {
+        throw new Error(result.error || 'Failed to update package');
+      }
+
+      toast({
+        title: "Package Updated",
+        description: `Package ${!currentStatus ? 'activated' : 'deactivated'} successfully`,
+      });
+      
+      // Refresh packages
+      if (branchId) {
+        const packagesData = await fetchBranchPackages(branchId);
+        if (packagesData.data) setPackages(packagesData.data);
+      }
+
+    } catch (error) {
+      console.error('Error updating package:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update package",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDeletePackage = async (id: string, packageName: string) => {
+    if (!confirm(`Are you sure you want to delete the package "${packageName}"? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || result.status !== 'success') {
+        throw new Error(result.error || 'Failed to delete package');
+      }
+
+      toast({
+        title: "Package Deleted",
+        description: `${packageName} has been deleted successfully`,
+      });
+      
+      // Refresh packages
+      if (branchId) {
+        const packagesData = await fetchBranchPackages(branchId);
+        if (packagesData.data) setPackages(packagesData.data);
+      }
+
+    } catch (error) {
+      console.error('Error deleting package:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete package",
+        variant: "destructive",
+      });
+    }
   };
 
   const stats = getStatsData();
@@ -537,11 +804,11 @@ const StaffDashboard = () => {
           <Card className="border-border">
             <CardContent className="p-4">
               <div className="flex items-center space-x-2">
-                <CheckCircle className="h-5 w-5 text-blue-500" />
+                <PackageIcon className="h-5 w-5 text-blue-500" />
                 <div>
-                  <p className="text-sm text-muted-foreground">Today's Check-ins</p>
-                  <p className="text-2xl font-bold text-blue-500">{stats.todayCheckIns}</p>
-                  <p className="text-xs text-muted-foreground">Members visited</p>
+                  <p className="text-sm text-muted-foreground">Branch Packages</p>
+                  <p className="text-2xl font-bold text-blue-500">{stats.activePackages}</p>
+                  <p className="text-xs text-muted-foreground">{stats.totalPackages} total</p>
                 </div>
               </div>
             </CardContent>
@@ -563,8 +830,9 @@ const StaffDashboard = () => {
 
         {/* Main Content */}
         <Tabs defaultValue="members" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-2 lg:w-64">
+          <TabsList className="grid w-full grid-cols-3 lg:w-96">
             <TabsTrigger value="members">Members</TabsTrigger>
+            <TabsTrigger value="packages">Packages</TabsTrigger>
             <TabsTrigger value="staff">Staff</TabsTrigger>
           </TabsList>
 
@@ -741,6 +1009,177 @@ const StaffDashboard = () => {
             )}
           </TabsContent>
 
+          {/* Packages Tab */}
+          <TabsContent value="packages" className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-2xl font-bold">Package Management</h2>
+                <p className="text-muted-foreground">Manage membership packages for this branch</p>
+              </div>
+              <Dialog open={isAddPackageOpen} onOpenChange={setIsAddPackageOpen}>
+                <DialogTrigger asChild>
+                  <Button>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Package
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Add New Package</DialogTitle>
+                    <DialogDescription>Create a new membership package for {branch?.name}</DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div>
+                      <Label htmlFor="packageName">Package Name *</Label>
+                      <Input
+                        id="packageName"
+                        value={packageForm.name}
+                        onChange={(e) => setPackageForm(prev => ({ ...prev, name: e.target.value }))}
+                        placeholder="Premium Monthly"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor="packageType">Type *</Label>
+                        <Select value={packageForm.type} onValueChange={(value) => setPackageForm(prev => ({ ...prev, type: value }))}>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="individual">Individual</SelectItem>
+                            <SelectItem value="couple">Couple</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label htmlFor="packagePrice">Price ($) *</Label>
+                        <Input
+                          id="packagePrice"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={packageForm.price}
+                          onChange={(e) => setPackageForm(prev => ({ ...prev, price: e.target.value }))}
+                          placeholder="49.99"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <Label htmlFor="packageDuration">Duration (months) *</Label>
+                      <Input
+                        id="packageDuration"
+                        type="number"
+                        min="1"
+                        value={packageForm.duration_months}
+                        onChange={(e) => setPackageForm(prev => ({ ...prev, duration_months: e.target.value }))}
+                        placeholder="1"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="packageFeatures">Features (comma-separated)</Label>
+                      <Textarea
+                        id="packageFeatures"
+                        value={packageForm.features.join(', ')}
+                        onChange={(e) => setPackageForm(prev => ({ 
+                          ...prev, 
+                          features: e.target.value.split(',').map(f => f.trim()).filter(f => f.length > 0)
+                        }))}
+                        placeholder="Gym Access, Locker Room, Group Classes"
+                        rows={3}
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" onClick={() => {
+                        setIsAddPackageOpen(false);
+                        resetPackageForm();
+                      }}>
+                        Cancel
+                      </Button>
+                      <Button onClick={handleAddPackage}>
+                        Add Package
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {packages.map((pkg) => (
+                <Card key={pkg.id} className="border-border">
+                  <CardHeader>
+                    <CardTitle className="flex items-center justify-between">
+                      <span className="truncate">{pkg.name}</span>
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          checked={pkg.is_active}
+                          onCheckedChange={() => handleTogglePackageStatus(pkg.id, pkg.is_active)}
+                        />
+                        <Badge variant={pkg.is_active ? "default" : "secondary"}>
+                          {pkg.is_active ? <CheckCircle className="h-3 w-3 mr-1" /> : <XCircle className="h-3 w-3 mr-1" />}
+                          {pkg.is_active ? "Active" : "Inactive"}
+                        </Badge>
+                      </div>
+                    </CardTitle>
+                    <CardDescription className="text-2xl font-bold text-primary">
+                      ${pkg.price}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span>Type:</span>
+                      <span className="font-semibold capitalize">{pkg.type}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span>Duration:</span>
+                      <span className="font-semibold">{pkg.duration_months} month{pkg.duration_months > 1 ? 's' : ''}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {pkg.features.map((feature, index) => (
+                        <Badge key={index} variant="outline" className="text-xs">
+                          {feature}
+                        </Badge>
+                      ))}
+                    </div>
+                    <div className="flex gap-2 pt-3">
+                      <Button 
+                        size="sm" 
+                        variant="outline" 
+                        className="flex-1"
+                        onClick={() => handleEditPackage(pkg)}
+                      >
+                        <Edit className="h-4 w-4 mr-1" />
+                        Edit
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="destructive" 
+                        className="flex-1"
+                        onClick={() => handleDeletePackage(pkg.id, pkg.name)}
+                      >
+                        <Trash2 className="h-4 w-4 mr-1" />
+                        Delete
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+
+            {/* Empty State for Packages */}
+            {packages.length === 0 && (
+              <div className="text-center py-12">
+                <PackageIcon className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <h3 className="text-lg font-medium mb-2">No packages found</h3>
+                <p className="text-muted-foreground mb-4">Create your first membership package for this branch</p>
+                <Button onClick={() => setIsAddPackageOpen(true)}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Package
+                </Button>
+              </div>
+            )}
+          </TabsContent>
+
           <TabsContent value="staff" className="space-y-6">
             <StaffManagement staff={staff} branchId={branchId!} onStaffUpdate={() => {
               // Refresh staff data
@@ -752,6 +1191,89 @@ const StaffDashboard = () => {
             }} />
           </TabsContent>
         </Tabs>
+
+        {/* Edit Package Dialog */}
+        <Dialog open={isEditPackageOpen} onOpenChange={setIsEditPackageOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Edit Package</DialogTitle>
+              <DialogDescription>Update package details for {selectedPackage?.name}</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="editPackageName">Package Name *</Label>
+                <Input
+                  id="editPackageName"
+                  value={packageForm.name}
+                  onChange={(e) => setPackageForm(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="Premium Monthly"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="editPackageType">Type *</Label>
+                  <Select value={packageForm.type} onValueChange={(value) => setPackageForm(prev => ({ ...prev, type: value }))}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="individual">Individual</SelectItem>
+                      <SelectItem value="couple">Couple</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="editPackagePrice">Price ($) *</Label>
+                  <Input
+                    id="editPackagePrice"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={packageForm.price}
+                    onChange={(e) => setPackageForm(prev => ({ ...prev, price: e.target.value }))}
+                    placeholder="49.99"
+                  />
+                </div>
+              </div>
+              <div>
+                <Label htmlFor="editPackageDuration">Duration (months) *</Label>
+                <Input
+                  id="editPackageDuration"
+                  type="number"
+                  min="1"
+                  value={packageForm.duration_months}
+                  onChange={(e) => setPackageForm(prev => ({ ...prev, duration_months: e.target.value }))}
+                  placeholder="1"
+                />
+              </div>
+              <div>
+                <Label htmlFor="editPackageFeatures">Features (comma-separated)</Label>
+                <Textarea
+                  id="editPackageFeatures"
+                  value={packageForm.features.join(', ')}
+                  onChange={(e) => setPackageForm(prev => ({ 
+                    ...prev, 
+                    features: e.target.value.split(',').map(f => f.trim()).filter(f => f.length > 0)
+                  }))}
+                  placeholder="Gym Access, Locker Room, Group Classes"
+                  rows={3}
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => {
+                  setIsEditPackageOpen(false);
+                  setSelectedPackage(null);
+                  resetPackageForm();
+                }}>
+                  Cancel
+                </Button>
+                <Button onClick={handleUpdatePackage}>
+                  Update Package
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Modals */}
         <AddNewMemberModal 

@@ -10,14 +10,47 @@ router.use((req, res, next) => {
   next();
 });
 
-// Get all active packages (public access)
-router.get('/active', optionalAuth, async (req, res) => {
+// Get packages by branch (for staff dashboard)
+router.get('/branch/:branchId', optionalAuth, async (req, res) => {
   try {
-    console.log('📦 Getting all active packages');
+    console.log(`📦 Getting packages for branch: ${req.params.branchId}`);
     
     const { data, error } = await supabase
       .from('packages')
       .select('*')
+      .eq('branch_id', req.params.branchId)
+      .order('price');
+    
+    if (error) {
+      console.error('Database error:', error);
+      throw error;
+    }
+    
+    console.log(`✅ Found ${data?.length || 0} packages for branch`);
+    
+    res.json({ 
+      status: 'success', 
+      data: data || []
+    });
+  } catch (error) {
+    console.error('Error fetching branch packages:', error);
+    res.status(500).json({
+      status: 'error',
+      error: 'Failed to fetch branch packages',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+// Get all active packages for a branch (public access)
+router.get('/branch/:branchId/active', optionalAuth, async (req, res) => {
+  try {
+    console.log(`📦 Getting active packages for branch: ${req.params.branchId}`);
+    
+    const { data, error } = await supabase
+      .from('packages')
+      .select('*')
+      .eq('branch_id', req.params.branchId)
       .eq('is_active', true)
       .order('price');
     
@@ -26,14 +59,46 @@ router.get('/active', optionalAuth, async (req, res) => {
       throw error;
     }
     
-    console.log(`✅ Found ${data?.length || 0} active packages`);
+    console.log(`✅ Found ${data?.length || 0} active packages for branch`);
     
     res.json({ 
       status: 'success', 
       data: data || []
     });
   } catch (error) {
-    console.error('Error fetching active packages:', error);
+    console.error('Error fetching active branch packages:', error);
+    res.status(500).json({
+      status: 'error',
+      error: 'Failed to fetch active branch packages',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+// Get all active packages (public access) - ADMIN ONLY NOW
+router.get('/active', authenticate, async (req, res) => {
+  try {
+    console.log('📦 Getting all active packages (admin)');
+    
+    const { data, error } = await supabase
+      .from('packages')
+      .select('*, branches(name)')
+      .eq('is_active', true)
+      .order('price');
+    
+    if (error) {
+      console.error('Database error:', error);
+      throw error;
+    }
+    
+    console.log(`✅ Found ${data?.length || 0} active packages across all branches`);
+    
+    res.json({ 
+      status: 'success', 
+      data: data || []
+    });
+  } catch (error) {
+    console.error('Error fetching all active packages:', error);
     res.status(500).json({
       status: 'error',
       error: 'Failed to fetch active packages',
@@ -45,16 +110,16 @@ router.get('/active', optionalAuth, async (req, res) => {
 // Get all packages (admin access)
 router.get('/', authenticate, async (req, res) => {
   try {
-    console.log('📦 Getting all packages');
+    console.log('📦 Getting all packages (admin)');
     
     const { data, error } = await supabase
       .from('packages')
-      .select('*')
+      .select('*, branches(name)')
       .order('price');
     
     if (error) throw error;
     
-    console.log(`✅ Found ${data?.length || 0} total packages`);
+    console.log(`✅ Found ${data?.length || 0} total packages across all branches`);
     
     res.json({ 
       status: 'success', 
@@ -78,7 +143,7 @@ router.get('/:id', optionalAuth, async (req, res) => {
 
     const { data, error } = await supabase
       .from('packages')
-      .select('*')
+      .select('*, branches(name)')
       .eq('id', id)
       .single();
 
@@ -106,19 +171,19 @@ router.get('/:id', optionalAuth, async (req, res) => {
   }
 });
 
-// Create new package
+// Create new package (with branch_id)
 router.post('/', authenticate, async (req, res) => {
   try {
     console.log('➕ Creating new package:', req.body);
     
-    const { name, type, price, duration_months, features, is_active = true } = req.body;
+    const { branch_id, name, type, price, duration_months, features, is_active = true } = req.body;
 
     // Validation
-    if (!name || !type || price === undefined || !duration_months) {
+    if (!branch_id || !name || !type || price === undefined || !duration_months) {
       console.log('❌ Missing required fields');
       return res.status(400).json({
         status: 'error',
-        error: 'Missing required fields: name, type, price, duration_months'
+        error: 'Missing required fields: branch_id, name, type, price, duration_months'
       });
     }
 
@@ -132,11 +197,27 @@ router.post('/', authenticate, async (req, res) => {
       });
     }
 
+    // Check if branch exists
+    const { data: branch, error: branchError } = await supabase
+      .from('branches')
+      .select('id')
+      .eq('id', branch_id)
+      .single();
+
+    if (branchError || !branch) {
+      console.log('❌ Branch not found');
+      return res.status(404).json({
+        status: 'error',
+        error: 'Branch not found'
+      });
+    }
+
     // Create package
     console.log('💾 Inserting package into database...');
     const { data, error } = await supabase
       .from('packages')
       .insert({
+        branch_id,
         name,
         type,
         price: parseFloat(price),
@@ -247,7 +328,7 @@ router.delete('/:id', authenticate, async (req, res) => {
     // Get package to verify existence
     const { data: packageData, error: fetchError } = await supabase
       .from('packages')
-      .select('*')
+      .select('*, branches(name)')
       .eq('id', id)
       .single();
 
