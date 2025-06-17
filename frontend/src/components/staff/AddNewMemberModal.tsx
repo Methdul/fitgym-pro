@@ -4,13 +4,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
   Mail, Phone, MapPin, User, CreditCard, Calendar, Shield, 
-  Package, UserPlus, Search, X, Users, Check, Eye, EyeOff
+  Package, UserPlus, Search, X, Users, Check, CheckCircle, Copy
 } from 'lucide-react';
 import { db } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
@@ -23,10 +22,10 @@ interface AddNewMemberModalProps {
   onMemberAdded: () => void;
 }
 
-type Step = 'package' | 'members' | 'payment' | 'account' | 'verification';
+type Step = 'package' | 'members' | 'payment' | 'verification' | 'success';
 
 interface MemberFormData {
-  id?: string; // For existing members
+  id?: string;
   isExisting: boolean;
   firstName: string;
   lastName: string;
@@ -45,6 +44,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
   const [existingMembers, setExistingMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchingMembers, setSearchingMembers] = useState(false);
+  const [createdAccounts, setCreatedAccounts] = useState<any[]>([]);
   const { toast } = useToast();
 
   // Form state
@@ -58,10 +58,6 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
     duration: 1,
     price: 0,
     paymentMethod: ''
-  });
-
-  const [accountOptions, setAccountOptions] = useState({
-    createAccount: true
   });
 
   const [verification, setVerification] = useState({
@@ -123,7 +119,6 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
       setSearchingMembers(true);
       const { data } = await db.members.getByBranch(branchId);
       if (data) {
-        // Only include active members for selection
         const activeMembers = data.filter(member => {
           const now = new Date();
           const expiryDate = new Date(member.expiry_date);
@@ -167,7 +162,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
     switch (packageType) {
       case 'individual': return 1;
       case 'couple': return 2;
-      case 'family': return 4; // Max 4 for family
+      case 'family': return 4;
       default: return 1;
     }
   };
@@ -190,7 +185,6 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
       member.phone.includes(existingMemberSearch)
     );
     
-    // Exclude members that are already selected in other forms
     const isAlreadySelected = memberForms.some((form, index) => 
       index !== currentMemberIndex && form.isExisting && form.id === member.id
     );
@@ -216,7 +210,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
         lastName: member.last_name,
         email: member.email,
         phone: member.phone,
-        address: '', // We don't have address in member data
+        address: '',
         emergencyContact: '',
         emergencyPhone: '',
         nationalId: member.national_id
@@ -224,7 +218,6 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
       return updated;
     });
 
-    // Add to selected existing members for tracking
     setSelectedExistingMembers(prev => {
       const updated = [...prev];
       updated[index] = member;
@@ -267,9 +260,9 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
     if (!member.isExisting) {
       return member.firstName && member.lastName && member.email && 
              member.phone && member.address && member.emergencyContact && 
-             member.emergencyPhone;
+             member.emergencyPhone && member.nationalId;
     }
-    return true; // Existing members are already validated
+    return true;
   };
 
   const validateAllMemberForms = () => {
@@ -297,14 +290,14 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
 
     if (currentMemberIndex < memberForms.length - 1) {
       setCurrentMemberIndex(currentMemberIndex + 1);
-      setExistingMemberSearch(''); // Clear search for next member
+      setExistingMemberSearch('');
     }
   };
 
   const handlePreviousMember = () => {
     if (currentMemberIndex > 0) {
       setCurrentMemberIndex(currentMemberIndex - 1);
-      setExistingMemberSearch(''); // Clear search when going back
+      setExistingMemberSearch('');
     }
   };
 
@@ -340,11 +333,10 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
       return;
     }
 
-    const steps: Step[] = ['package', 'members', 'payment', 'account', 'verification'];
+    const steps: Step[] = ['package', 'members', 'payment', 'verification'];
     const currentIndex = steps.indexOf(currentStep);
     if (currentIndex < steps.length - 1) {
       setCurrentStep(steps[currentIndex + 1]);
-      // Reset member index when leaving members step
       if (currentStep === 'members') {
         setCurrentMemberIndex(0);
       }
@@ -352,11 +344,19 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
   };
 
   const handleBack = () => {
-    const steps: Step[] = ['package', 'members', 'payment', 'account', 'verification'];
+    const steps: Step[] = ['package', 'members', 'payment', 'verification'];
     const currentIndex = steps.indexOf(currentStep);
     if (currentIndex > 0) {
       setCurrentStep(steps[currentIndex - 1]);
     }
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast({
+      title: "Copied",
+      description: "Copied to clipboard",
+    });
   };
 
   const handleSubmit = async () => {
@@ -371,7 +371,6 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
 
     setLoading(true);
     try {
-      // Verify staff PIN
       const { isValid } = await db.staff.verifyPin(verification.staffId, verification.pin);
       
       if (!isValid) {
@@ -383,17 +382,18 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
         return;
       }
 
-      // Calculate dates
       const startDate = new Date();
       const expiryDate = new Date();
       expiryDate.setMonth(expiryDate.getMonth() + paymentInfo.duration);
+
+      const accounts = [];
 
       // Process each member
       for (let i = 0; i < memberForms.length; i++) {
         const memberForm = memberForms[i];
         
         if (memberForm.isExisting && memberForm.id) {
-          // Update existing member with new package info
+          // Update existing member
           const updateData = {
             status: 'active' as const,
             package_type: selectedPackage!.type,
@@ -408,32 +408,40 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
           const { error } = await db.members.update(memberForm.id, updateData);
           if (error) throw error;
         } else {
-          // Create new member
+          // Create new member with automatic account creation
           const memberData = {
             branch_id: branchId,
             first_name: memberForm.firstName,
             last_name: memberForm.lastName,
-            email: memberForm.email,
+            email: memberForm.email, // Real email for new members
             phone: memberForm.phone,
-            national_id: memberForm.nationalId || Math.random().toString().substring(2, 12),
+            national_id: memberForm.nationalId,
             status: 'active' as const,
             package_type: selectedPackage!.type,
             package_name: selectedPackage!.name,
             package_price: paymentInfo.price,
             start_date: startDate.toISOString().split('T')[0],
             expiry_date: expiryDate.toISOString().split('T')[0],
-            is_verified: accountOptions.createAccount,
+            is_verified: false,
+            is_existing_member: false, // This is a new member with real email
             processed_by_staff_id: verification.staffId,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           };
 
-          const { error } = await db.members.create(memberData);
+          const { error, data } = await db.members.create(memberData);
           if (error) throw error;
+          
+          // Store account info for display
+          if (data && data.account) {
+            accounts.push({
+              member: memberForm,
+              account: data.account
+            });
+          }
         }
       }
 
-      // Log the action
       await db.actionLogs.create({
         staff_id: verification.staffId,
         action_type: 'MEMBER_ADDED',
@@ -441,15 +449,15 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
         created_at: new Date().toISOString()
       });
 
+      setCreatedAccounts(accounts);
+      setCurrentStep('success');
+
       const memberNames = memberForms.map(m => `${m.firstName} ${m.lastName}`).join(', ');
       toast({
         title: "Members Added",
-        description: `${memberNames} ${memberForms.length > 1 ? 'have' : 'has'} been successfully added`
+        description: `${memberNames} ${memberForms.length > 1 ? 'have' : 'has'} been successfully added with login accounts`
       });
 
-      // Reset form
-      resetForm();
-      onOpenChange(false);
       onMemberAdded();
     } catch (error) {
       console.error('Error adding members:', error);
@@ -470,9 +478,9 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
     setCurrentMemberIndex(0);
     setSelectedExistingMembers([]);
     setPaymentInfo({ duration: 1, price: 0, paymentMethod: '' });
-    setAccountOptions({ createAccount: true });
     setVerification({ staffId: '', pin: '' });
     setExistingMemberSearch('');
+    setCreatedAccounts([]);
   };
 
   const renderStepContent = () => {
@@ -535,16 +543,6 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                 ))}
               </div>
             )}
-            
-            {packages.length === 0 && (
-              <Card className="border-yellow-500/20 bg-yellow-500/5">
-                <CardContent className="p-4 text-center">
-                  <p className="text-sm text-yellow-700">
-                    No active packages available for this branch. Please contact an administrator to add packages.
-                  </p>
-                </CardContent>
-              </Card>
-            )}
           </div>
         );
 
@@ -561,7 +559,6 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
         
         return (
           <div className="space-y-6">
-            {/* Header with Progress */}
             <div className="text-center">
               <Users className="h-12 w-12 mx-auto mb-4 text-primary" />
               <h3 className="text-lg font-semibold">{memberLabel}</h3>
@@ -575,7 +572,6 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
               </div>
             </div>
 
-            {/* Progress Dots */}
             <div className="flex justify-center space-x-2">
               {Array.from({ length: totalMembers }).map((_, index) => (
                 <div
@@ -591,7 +587,6 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
               ))}
             </div>
 
-            {/* Single Member Form */}
             <Card className="border-border max-w-2xl mx-auto">
               <CardHeader>
                 <CardTitle className="text-center">
@@ -599,7 +594,6 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
-                {/* New vs Existing Member Selection */}
                 {selectedPackage.type !== 'individual' && !currentMember.isExisting && (
                   <div>
                     <Tabs defaultValue="new" className="w-full">
@@ -655,7 +649,6 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                   </div>
                 )}
 
-                {/* Member Form Content */}
                 {currentMember.isExisting ? (
                   <div className="bg-green-100 border border-green-300 rounded-lg p-6">
                     <div className="flex items-center gap-2 mb-4">
@@ -692,6 +685,16 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                   </div>
                 ) : (
                   <div className="space-y-4">
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <div className="flex items-center gap-2 text-blue-800 font-medium mb-1">
+                        <Shield className="h-4 w-4" />
+                        Auto Account Creation
+                      </div>
+                      <p className="text-sm text-blue-600">
+                        A login account will be created automatically using the email and National ID as temporary password.
+                      </p>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <Label htmlFor="firstName">First Name *</Label>
@@ -741,6 +744,19 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                         />
                       </div>
                     </div>
+
+                    <div>
+                      <Label htmlFor="nationalId">National ID *</Label>
+                      <Input
+                        id="nationalId"
+                        value={currentMember.nationalId}
+                        onChange={(e) => updateMemberForm(currentMemberIndex, 'nationalId', e.target.value)}
+                        placeholder="123456789"
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">
+                        This will be used as the temporary password
+                      </p>
+                    </div>
                     
                     <div>
                       <Label htmlFor="address">Address *</Label>
@@ -779,7 +795,6 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                   </div>
                 )}
 
-                {/* Member Navigation */}
                 {totalMembers > 1 && (
                   <div className="flex justify-between items-center pt-4 border-t">
                     <Button
@@ -882,40 +897,6 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
           </div>
         );
 
-      case 'account':
-        return (
-          <div className="space-y-4">
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="createAccount"
-                checked={accountOptions.createAccount}
-                onCheckedChange={(checked) => setAccountOptions({ createAccount: !!checked })}
-              />
-              <Label htmlFor="createAccount">Create login accounts for new members</Label>
-            </div>
-            <Card className="bg-muted/50">
-              <CardContent className="p-4">
-                <h4 className="font-medium mb-2">Account Options</h4>
-                <div className="space-y-2 text-sm">
-                  {accountOptions.createAccount ? (
-                    <>
-                      <p className="text-green-600">✓ New members will receive email verification</p>
-                      <p className="text-green-600">✓ Can access member dashboard</p>
-                      <p className="text-green-600">✓ Can manage their profile online</p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="text-muted-foreground">• Database records only</p>
-                      <p className="text-muted-foreground">• No online access</p>
-                      <p className="text-muted-foreground">• Staff can create accounts later</p>
-                    </>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        );
-
       case 'verification':
         return (
           <div className="space-y-4">
@@ -926,7 +907,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                   <h4 className="font-medium">Staff Verification Required</h4>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Please verify your identity to complete the member registration
+                  Please verify your identity to complete the member registration with automatic account creation
                 </p>
               </CardContent>
             </Card>
@@ -975,10 +956,90 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                     <p><strong>Members:</strong> {memberForms.map(m => `${m.firstName} ${m.lastName}`).join(', ')}</p>
                     <p><strong>Duration:</strong> {paymentInfo.duration} months</p>
                     <p><strong>Total:</strong> ${paymentInfo.price}</p>
+                    <div className="bg-blue-100 border border-blue-300 rounded p-2 mt-2">
+                      <p className="text-blue-800 font-medium text-xs">
+                        ✅ Login accounts will be created automatically for all new members
+                      </p>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
             )}
+          </div>
+        );
+
+      case 'success':
+        return (
+          <div className="space-y-6">
+            <div className="text-center">
+              <CheckCircle className="h-16 w-16 mx-auto mb-4 text-green-500" />
+              <h3 className="text-2xl font-semibold text-green-800">Members Created Successfully!</h3>
+              <p className="text-muted-foreground mt-2">
+                {memberForms.length} member{memberForms.length > 1 ? 's have' : ' has'} been added with login accounts
+              </p>
+            </div>
+
+            {createdAccounts.length > 0 && (
+              <div className="space-y-4">
+                <h4 className="font-medium text-center">Login Credentials</h4>
+                {createdAccounts.map((accountData, index) => (
+                  <Card key={index} className="border-green-500/20 bg-green-500/5">
+                    <CardHeader>
+                      <CardTitle className="text-green-800">
+                        {accountData.member.firstName} {accountData.member.lastName}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="grid grid-cols-1 gap-3">
+                        <div className="flex items-center justify-between p-3 bg-white rounded border">
+                          <div>
+                            <p className="text-sm text-muted-foreground">Email</p>
+                            <p className="font-mono text-sm">{accountData.account.email}</p>
+                          </div>
+                          <Button size="sm" variant="outline" onClick={() => copyToClipboard(accountData.account.email)}>
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        
+                        <div className="flex items-center justify-between p-3 bg-white rounded border">
+                          <div>
+                            <p className="text-sm text-muted-foreground">Temporary Password</p>
+                            <p className="font-mono text-sm">{accountData.account.temporaryPassword}</p>
+                          </div>
+                          <Button size="sm" variant="outline" onClick={() => copyToClipboard(accountData.account.temporaryPassword)}>
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                  <h4 className="font-medium text-yellow-800 mb-2">Instructions for Members:</h4>
+                  <ul className="text-sm text-yellow-700 space-y-1">
+                    <li>1. Login with the provided email and password</li>
+                    <li>2. Change password from National ID to secure password</li>
+                    <li>3. Verify email address if required</li>
+                    <li>4. Complete profile information</li>
+                  </ul>
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => {
+                resetForm();
+                onOpenChange(false);
+              }} className="flex-1">
+                Close
+              </Button>
+              <Button onClick={() => {
+                resetForm();
+              }} className="flex-1">
+                Add More Members
+              </Button>
+            </div>
           </div>
         );
 
@@ -1001,8 +1062,8 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
         }
         return 'Member Information';
       case 'payment': return 'Duration & Payment';
-      case 'account': return 'Account Options';
       case 'verification': return 'Staff Verification';
+      case 'success': return 'Success';
       default: return '';
     }
   };
@@ -1012,10 +1073,19 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
       case 'package': return validatePackageSelection();
       case 'members': return validateAllMemberForms();
       case 'payment': return validatePaymentInfo();
-      case 'account': return true;
       case 'verification': return verification.staffId && verification.pin;
+      case 'success': return true;
       default: return false;
     }
+  };
+
+  const getStepNumber = () => {
+    const steps = ['package', 'members', 'payment', 'verification', 'success'];
+    return steps.indexOf(currentStep) + 1;
+  };
+
+  const getTotalSteps = () => {
+    return currentStep === 'success' ? 5 : 4;
   };
 
   return (
@@ -1025,59 +1095,59 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
     }}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Add New Member - Step {['package', 'members', 'payment', 'account', 'verification'].indexOf(currentStep) + 1} of 5</DialogTitle>
+          <DialogTitle>Add New Member - Step {getStepNumber()} of {getTotalSteps()}</DialogTitle>
           <p className="text-muted-foreground">{getStepTitle()}</p>
         </DialogHeader>
 
         <div className="space-y-6">
-          {/* Progress Bar */}
-          <div className="flex space-x-2">
-            {['package', 'members', 'payment', 'account', 'verification'].map((step, index) => (
-              <div
-                key={step}
-                className={`flex-1 h-2 rounded ${
-                  ['package', 'members', 'payment', 'account', 'verification'].indexOf(currentStep) >= index
-                    ? 'bg-primary'
-                    : 'bg-muted'
-                }`}
-              />
-            ))}
-          </div>
+          {currentStep !== 'success' && (
+            <div className="flex space-x-2">
+              {['package', 'members', 'payment', 'verification'].map((step, index) => (
+                <div
+                  key={step}
+                  className={`flex-1 h-2 rounded ${
+                    ['package', 'members', 'payment', 'verification'].indexOf(currentStep) >= index
+                      ? 'bg-primary'
+                      : 'bg-muted'
+                  }`}
+                />
+              ))}
+            </div>
+          )}
 
-          {/* Step Content */}
           {renderStepContent()}
 
-          {/* Navigation Buttons */}
-          <div className="flex gap-2 pt-4">
-            <Button 
-              variant="outline" 
-              onClick={handleBack} 
-              disabled={currentStep === 'package'}
-              className="flex-1"
-            >
-              Back
-            </Button>
-            {currentStep === 'verification' ? (
+          {currentStep !== 'success' && (
+            <div className="flex gap-2 pt-4">
               <Button 
-                onClick={handleSubmit} 
-                disabled={loading || !canProceed()} 
+                variant="outline" 
+                onClick={handleBack} 
+                disabled={currentStep === 'package'}
                 className="flex-1"
               >
-                {loading ? 'Creating Members...' : 'Create Members'}
+                Back
               </Button>
-            ) : currentStep === 'members' ? (
-              // Members step uses internal navigation, hide main Next button
-              <div className="flex-1" />
-            ) : (
-              <Button 
-                onClick={handleNext} 
-                disabled={!canProceed()} 
-                className="flex-1"
-              >
-                Next
-              </Button>
-            )}
-          </div>
+              {currentStep === 'verification' ? (
+                <Button 
+                  onClick={handleSubmit} 
+                  disabled={loading || !canProceed()} 
+                  className="flex-1"
+                >
+                  {loading ? 'Creating Members & Accounts...' : 'Create Members'}
+                </Button>
+              ) : currentStep === 'members' ? (
+                <div className="flex-1" />
+              ) : (
+                <Button 
+                  onClick={handleNext} 
+                  disabled={!canProceed()} 
+                  className="flex-1"
+                >
+                  Next
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>

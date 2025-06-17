@@ -10,6 +10,82 @@ router.use((req, res, next) => {
   next();
 });
 
+// Helper function to generate email for existing members
+const generateMemberEmail = (nationalId: string) => {
+  return `${nationalId}@gmail.com`;
+};
+
+// Helper function to create user account with rollback support
+const createUserAccount = async (email: string, password: string, userData: any) => {
+  console.log('🔐 Creating Supabase auth account for:', email);
+  
+  try {
+    // Step 1: Create Supabase Auth user - ALLOW UNVERIFIED LOGIN
+    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true, // Auto-confirm in Supabase Auth so they can login
+      user_metadata: {
+        first_name: userData.first_name,
+        last_name: userData.last_name,
+        user_type: 'member'
+      }
+    });
+
+    if (authError || !authData.user) {
+      console.error('❌ Auth account creation failed:', authError);
+      throw new Error(`Auth account creation failed: ${authError?.message || 'Unknown error'}`);
+    }
+
+    console.log('✅ Supabase auth account created:', authData.user.id);
+
+    // Step 2: Create user profile record with is_verified: false
+    const { data: userProfile, error: profileError } = await supabase
+      .from('users')
+      .insert({
+        auth_user_id: authData.user.id,
+        email: email,
+        first_name: userData.first_name,
+        last_name: userData.last_name,
+        role: 'member',
+        is_verified: false, // CUSTOM VERIFICATION FLAG
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (profileError || !userProfile) {
+      console.error('❌ User profile creation failed:', profileError);
+      
+      // Rollback: Delete the auth user
+      try {
+        await supabase.auth.admin.deleteUser(authData.user.id);
+        console.log('🔄 Rolled back auth user creation');
+      } catch (rollbackError) {
+        console.error('❌ Rollback failed:', rollbackError);
+      }
+      
+      throw new Error(`User profile creation failed: ${profileError?.message || 'Unknown error'}`);
+    }
+
+    console.log('✅ User profile created:', userProfile.id);
+
+    return {
+      authUser: authData.user,
+      userProfile,
+      credentials: {
+        email,
+        temporaryPassword: password
+      }
+    };
+
+  } catch (error) {
+    console.error('❌ User account creation failed:', error);
+    throw error;
+  }
+};
+
 // Get members by branch
 router.get('/branch/:branchId', optionalAuth, async (req, res) => {
   try {
@@ -42,10 +118,10 @@ router.get('/branch/:branchId', optionalAuth, async (req, res) => {
   }
 });
 
-// Create new member
+// Create new member with automatic account creation
 router.post('/', async (req, res) => {
   try {
-    console.log('➕ Creating new member:', req.body);
+    console.log('➕ Creating new member with account:', req.body);
     
     const { 
       branch_id, 
@@ -60,62 +136,92 @@ router.post('/', async (req, res) => {
       package_price,
       start_date,
       expiry_date,
-      is_verified = false
+      is_verified = false,
+      is_existing_member = false // New flag to distinguish member types
     } = req.body;
 
     // Validation
-    if (!branch_id || !first_name || !last_name || !email || !phone || !national_id) {
+    if (!branch_id || !first_name || !last_name || !phone || !national_id) {
       console.log('❌ Missing required fields');
       return res.status(400).json({
         status: 'error',
-        error: 'Missing required fields: branch_id, first_name, last_name, email, phone, national_id'
+        error: 'Missing required fields: branch_id, first_name, last_name, phone, national_id'
       });
     }
 
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      console.log('❌ Invalid email format');
-      return res.status(400).json({
-        status: 'error',
-        error: 'Invalid email format'
-      });
+    // Determine email and account type
+    let accountEmail = email;
+    let accountType = 'new_member';
+    
+    if (is_existing_member || !email) {
+      // For existing members, generate simple email using National ID
+      accountEmail = generateMemberEmail(national_id);
+      accountType = 'existing_member';
+      console.log('🏢 Generated email for existing member:', accountEmail);
+    } else {
+      // For new members, validate provided email
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        console.log('❌ Invalid email format');
+        return res.status(400).json({
+          status: 'error',
+          error: 'Invalid email format'
+        });
+      }
+      console.log('📧 Using provided email for new member:', accountEmail);
     }
 
-    // Check if email already exists
-    const { data: existingMember } = await supabase
-      .from('members')
-      .select('id')
-      .eq('email', email)
-      .single();
-
-    if (existingMember) {
-      console.log('❌ Email already exists');
-      return res.status(409).json({
-        status: 'error',
-        error: 'Member with this email already exists'
-      });
-    }
-
-    // Check if national_id already exists
+    // Check if national_id already exists FIRST (more specific error)
     const { data: existingNationalId } = await supabase
       .from('members')
-      .select('id')
+      .select('id, first_name, last_name, email, status')
       .eq('national_id', national_id)
       .single();
 
     if (existingNationalId) {
-      console.log('❌ National ID already exists');
+      console.log('❌ National ID already exists:', existingNationalId);
       return res.status(409).json({
         status: 'error',
-        error: 'Member with this national ID already exists'
+        error: 'Member with this National ID already exists',
+        details: {
+          existingMember: {
+            name: `${existingNationalId.first_name} ${existingNationalId.last_name}`,
+            email: existingNationalId.email,
+            status: existingNationalId.status
+          },
+          suggestion: 'This person already has an account. Use "Update Member" instead or check if this is a different person.'
+        }
+      });
+    }
+
+    // Check if email already exists in auth system (for edge cases)
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('email, first_name, last_name')
+      .eq('email', accountEmail)
+      .single();
+
+    if (existingUser) {
+      console.log('❌ Email already exists in system:', existingUser);
+      return res.status(409).json({
+        status: 'error',
+        error: 'An account with this email already exists',
+        details: {
+          existingUser: {
+            name: `${existingUser.first_name} ${existingUser.last_name}`,
+            email: existingUser.email
+          },
+          suggestion: accountType === 'existing_member' 
+            ? 'This National ID is already in use. Each person can only have one account.'
+            : 'This email is already registered. Please use a different email address.'
+        }
       });
     }
 
     // Check if branch exists
     const { data: branch, error: branchError } = await supabase
       .from('branches')
-      .select('id')
+      .select('id, name')
       .eq('id', branch_id)
       .single();
 
@@ -127,15 +233,28 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // Create member
-    console.log('💾 Inserting member into database...');
-    const { data, error } = await supabase
+    // Create user account (Auth + Profile)
+    console.log('🔐 Creating user account...');
+    const userAccountData = await createUserAccount(
+      accountEmail,
+      national_id, // Use national_id as temporary password
+      {
+        first_name,
+        last_name,
+        account_type: accountType
+      }
+    );
+
+    // Create member record
+    console.log('💾 Creating member record...');
+    const { data: memberData, error: memberError } = await supabase
       .from('members')
       .insert({
+        user_id: userAccountData.userProfile.id, // Link to user profile
         branch_id,
         first_name,
         last_name,
-        email,
+        email: accountEmail, // Store the email we used for the account
         phone,
         national_id,
         status,
@@ -143,7 +262,7 @@ router.post('/', async (req, res) => {
         package_name: package_name || 'Basic Package',
         package_price: package_price || 0,
         start_date: start_date || new Date().toISOString().split('T')[0],
-        expiry_date: expiry_date || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 30 days from now
+        expiry_date: expiry_date || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         is_verified,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -151,38 +270,65 @@ router.post('/', async (req, res) => {
       .select()
       .single();
 
-    if (error) {
-      console.error('❌ Database error:', error);
+    if (memberError) {
+      console.error('❌ Member creation failed, rolling back user account:', memberError);
+      
+      // Rollback: Delete user profile and auth user
+      try {
+        await supabase.from('users').delete().eq('id', userAccountData.userProfile.id);
+        await supabase.auth.admin.deleteUser(userAccountData.authUser.id);
+        console.log('🔄 Successfully rolled back user account');
+      } catch (rollbackError) {
+        console.error('❌ Critical: Rollback failed:', rollbackError);
+      }
+      
       return res.status(500).json({
         status: 'error',
         error: 'Failed to create member',
-        message: error.message
+        message: memberError.message
       });
     }
 
-    console.log('✅ Member created successfully:', data.id);
+    console.log('✅ Member created successfully:', memberData.id);
 
-    res.status(201).json({
+    // Prepare response
+    const response = {
       status: 'success',
       data: {
-        id: data.id,
-        first_name: data.first_name,
-        last_name: data.last_name,
-        email: data.email,
-        phone: data.phone,
-        national_id: data.national_id,
-        status: data.status,
-        package_type: data.package_type,
-        package_name: data.package_name,
-        package_price: data.package_price,
-        start_date: data.start_date,
-        expiry_date: data.expiry_date,
-        is_verified: data.is_verified,
-        branch_id: data.branch_id,
-        created_at: data.created_at
+        member: {
+          id: memberData.id,
+          first_name: memberData.first_name,
+          last_name: memberData.last_name,
+          email: memberData.email,
+          phone: memberData.phone,
+          national_id: memberData.national_id,
+          status: memberData.status,
+          package_type: memberData.package_type,
+          package_name: memberData.package_name,
+          package_price: memberData.package_price,
+          start_date: memberData.start_date,
+          expiry_date: memberData.expiry_date,
+          is_verified: memberData.is_verified,
+          branch_id: memberData.branch_id,
+          created_at: memberData.created_at
+        },
+        account: {
+          email: userAccountData.credentials.email,
+          temporaryPassword: userAccountData.credentials.temporaryPassword,
+          accountType: accountType,
+          authUserId: userAccountData.authUser.id,
+          needsEmailVerification: true, // All new accounts need verification
+          needsPasswordChange: true // All members should change from national_id password
+        },
+        branch: {
+          id: branch.id,
+          name: branch.name
+        }
       },
-      message: 'Member created successfully'
-    });
+      message: `Member created successfully with ${accountType === 'existing_member' ? 'generated' : 'provided'} email account`
+    };
+
+    res.status(201).json(response);
 
   } catch (error) {
     console.error('❌ Error creating member:', error);
@@ -194,6 +340,7 @@ router.post('/', async (req, res) => {
   }
 });
 
+// ... rest of the routes remain the same as previous version ...
 // Get all members
 router.get('/', authenticate, async (req, res) => {
   try {
