@@ -33,7 +33,8 @@ import {
   Package as PackageIcon,
   XCircle,
   Edit,
-  BarChart3
+  BarChart3,
+  RefreshCw
 } from 'lucide-react';
 import { db } from '@/lib/supabase';
 import { AddNewMemberModal } from '@/components/staff/AddNewMemberModal';
@@ -116,6 +117,14 @@ const StaffDashboard = () => {
     const expiryDate = new Date(member.expiry_date);
     const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
     return member.status === 'active' && expiryDate <= nextWeek && expiryDate > now;
+  };
+
+  const getDaysUntilExpiry = (member: Member) => {
+    const now = new Date();
+    const expiryDate = new Date(member.expiry_date);
+    const diffTime = expiryDate.getTime() - now.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays;
   };
 
   useEffect(() => {
@@ -900,129 +909,152 @@ const StaffDashboard = () => {
                   </SelectContent>
                 </Select>
               </div>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={fetchData}
+                className="flex items-center gap-2"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Refresh
+              </Button>
             </div>
 
-            {/* Members Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredMembers.map((member) => {
-                const actualStatus = getActualMemberStatus(member);
-                return (
-                  <Card key={member.id} className="border-border hover:border-primary transition-colors">
-                    <CardHeader className="pb-3">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <CardTitle className="text-lg">
-                            {member.first_name} {member.last_name}
-                          </CardTitle>
-                          <div className="flex items-center gap-2 mt-1">
-                            <Badge className={getStatusBadgeColor(actualStatus)}>
-                              {actualStatus}
-                            </Badge>
-                            {member.is_verified && (
-                              <Badge variant="secondary" className="text-xs">
-                                Verified
-                              </Badge>
-                            )}
-                            {isExpiringSoon(member) && (
-                              <Badge variant="destructive" className="text-xs">
-                                Expiring Soon
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                        <Dialog>
-                          <DialogTrigger asChild>
-                            <Button variant="ghost" size="sm">
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent className="w-auto">
-                            <div className="space-y-2">
-                              <Button 
-                                variant="ghost" 
-                                className="w-full justify-start"
-                                onClick={() => handleMemberAction(member, 'view')}
-                              >
-                                <Eye className="h-4 w-4 mr-2" />
-                                View Profile
-                              </Button>
-                              {/* Only show Renew option for expired members */}
-                              {canRenewMember(member) && (
-                                <Button 
-                                  variant="ghost" 
-                                  className="w-full justify-start"
-                                  onClick={() => handleMemberAction(member, 'renew')}
+            {/* Members Table */}
+            <Card className="border-border">
+              <CardHeader>
+                <CardTitle>Members List ({filteredMembers.length})</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left p-3">Member</th>
+                        <th className="text-left p-3">Contact</th>
+                        <th className="text-left p-3">Status</th>
+                        <th className="text-left p-3">Package</th>
+                        <th className="text-left p-3">Expiry</th>
+                        <th className="text-left p-3">Price</th>
+                        <th className="text-left p-3">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredMembers.map((member) => {
+                        const actualStatus = getActualMemberStatus(member);
+                        const daysUntilExpiry = getDaysUntilExpiry(member);
+                        
+                        return (
+                          <tr key={member.id} className="border-b hover:bg-muted/50">
+                            <td className="p-3">
+                              <div>
+                                <p className="font-medium">{member.first_name} {member.last_name}</p>
+                                <p className="text-sm text-muted-foreground">
+                                  {member.is_verified && (
+                                    <Badge variant="secondary" className="text-xs mr-1">
+                                      Verified
+                                    </Badge>
+                                  )}
+                                  ID: {member.national_id}
+                                </p>
+                              </div>
+                            </td>
+                            <td className="p-3">
+                              <div className="text-sm">
+                                <p>{member.email}</p>
+                                <p className="text-muted-foreground">{member.phone}</p>
+                              </div>
+                            </td>
+                            <td className="p-3">
+                              <div className="flex flex-col gap-1">
+                                <Badge className={getStatusBadgeColor(actualStatus)}>
+                                  {actualStatus}
+                                </Badge>
+                                {isExpiringSoon(member) && (
+                                  <Badge variant="destructive" className="text-xs">
+                                    Expiring Soon
+                                  </Badge>
+                                )}
+                              </div>
+                            </td>
+                            <td className="p-3">
+                              <div>
+                                <p className="font-medium">{member.package_name}</p>
+                                <Badge variant="outline" className="text-xs mt-1">
+                                  {member.package_type}
+                                </Badge>
+                              </div>
+                            </td>
+                            <td className="p-3">
+                              <div>
+                                <p className="text-sm">{new Date(member.expiry_date).toLocaleDateString()}</p>
+                                {daysUntilExpiry > 0 ? (
+                                  <p className="text-xs text-green-600">{daysUntilExpiry} days left</p>
+                                ) : (
+                                  <p className="text-xs text-red-600">Expired {Math.abs(daysUntilExpiry)} days ago</p>
+                                )}
+                              </div>
+                            </td>
+                            <td className="p-3">
+                              <p className="font-bold text-primary">${member.package_price}</p>
+                            </td>
+                            <td className="p-3">
+                              <div className="flex gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleMemberAction(member, 'view')}
+                                  className="px-2"
                                 >
-                                  Renew Membership
+                                  <Eye className="h-4 w-4" />
                                 </Button>
-                              )}
-                              {/* Delete option - always available for staff */}
-                              <Button 
-                                variant="ghost" 
-                                className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50"
-                                onClick={() => handleMemberAction(member, 'delete')}
-                              >
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                Delete Member
-                              </Button>
-                            </div>
-                          </DialogContent>
-                        </Dialog>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="space-y-2">
-                      <div className="text-sm space-y-1">
-                        <p><span className="text-muted-foreground">Email:</span> {member.email}</p>
-                        <p><span className="text-muted-foreground">Phone:</span> {member.phone}</p>
-                        <p><span className="text-muted-foreground">Package:</span> {member.package_name}</p>
-                        <p><span className="text-muted-foreground">Expires:</span> {new Date(member.expiry_date).toLocaleDateString()}</p>
-                      </div>
-                      <div className="flex gap-2 pt-2">
-                        <Button 
-                          size="sm" 
-                          variant="outline" 
-                          className={canRenewMember(member) ? "flex-1" : "w-full"} 
-                          onClick={() => handleMemberAction(member, 'view')}
-                        >
-                          <Eye className="h-4 w-4 mr-1" />
-                          View
+                                {canRenewMember(member) && (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleMemberAction(member, 'renew')}
+                                    className="px-2 bg-green-600 hover:bg-green-700"
+                                  >
+                                    <RefreshCw className="h-4 w-4" />
+                                  </Button>
+                                )}
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={() => handleMemberAction(member, 'delete')}
+                                  className="px-2"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  
+                  {/* Empty State */}
+                  {filteredMembers.length === 0 && (
+                    <div className="text-center py-12">
+                      <Users className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                      <h3 className="text-lg font-medium mb-2">No members found</h3>
+                      <p className="text-muted-foreground mb-4">
+                        {searchTerm || statusFilter !== 'all' 
+                          ? 'Try adjusting your search or filter criteria'
+                          : 'Get started by adding your first member'
+                        }
+                      </p>
+                      {!searchTerm && statusFilter === 'all' && (
+                        <Button onClick={() => setShowAddNew(true)}>
+                          <Plus className="h-4 w-4 mr-2" />
+                          Add New Member
                         </Button>
-                        {/* Only show Renew button for expired members */}
-                        {canRenewMember(member) && (
-                          <Button 
-                            size="sm" 
-                            className="flex-1" 
-                            onClick={() => handleMemberAction(member, 'renew')}
-                          >
-                            Renew
-                          </Button>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-
-            {/* Empty State */}
-            {filteredMembers.length === 0 && (
-              <div className="text-center py-12">
-                <Users className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <h3 className="text-lg font-medium mb-2">No members found</h3>
-                <p className="text-muted-foreground mb-4">
-                  {searchTerm || statusFilter !== 'all' 
-                    ? 'Try adjusting your search or filter criteria'
-                    : 'Get started by adding your first member'
-                  }
-                </p>
-                {!searchTerm && statusFilter === 'all' && (
-                  <Button onClick={() => setShowAddNew(true)}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add New Member
-                  </Button>
-                )}
-              </div>
-            )}
+                      )}
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
 
           {/* Packages Tab */}
@@ -1404,6 +1436,7 @@ const StaffDashboard = () => {
               isOpen={showRenewMember} 
               onClose={() => setShowRenewMember(false)}
               member={selectedMember}
+              branchId={branchId!}
               onRenewalComplete={() => {
                 // Refresh members data
                 if (branchId) {

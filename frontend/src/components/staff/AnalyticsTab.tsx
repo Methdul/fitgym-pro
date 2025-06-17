@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { 
   TrendingUp, 
   DollarSign, 
@@ -18,7 +19,8 @@ import {
   BarChart3,
   PieChart,
   Activity,
-  FileText
+  FileText,
+  CalendarDays
 } from 'lucide-react';
 import { db } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
@@ -108,6 +110,9 @@ const AnalyticsTab = ({ branchId, branchName }: AnalyticsTabProps) => {
   const [dateRange, setDateRange] = useState('month');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
+  const [showDownloadModal, setShowDownloadModal] = useState(false);
+  const [downloadPeriod, setDownloadPeriod] = useState('');
+  const [downloadLoading, setDownloadLoading] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -167,88 +172,278 @@ const AnalyticsTab = ({ branchId, branchName }: AnalyticsTabProps) => {
     }
   };
 
-  const handleExportData = (format: 'csv' | 'pdf') => {
-    if (!analytics) return;
+  const getDateRange = (period: string) => {
+    const now = new Date();
+    let startDate, endDate;
 
-    if (format === 'csv') {
-      exportToCSV();
-    } else {
-      exportToPDF();
+    switch (period) {
+      case 'current_month':
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        break;
+      case 'past_month':
+        startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        endDate = new Date(now.getFullYear(), now.getMonth(), 0);
+        break;
+      case 'past_3_months':
+        startDate = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        break;
+      default:
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    }
+
+    return {
+      start: startDate.toISOString().split('T')[0],
+      end: endDate.toISOString().split('T')[0],
+      startFormatted: startDate.toLocaleDateString(),
+      endFormatted: endDate.toLocaleDateString()
+    };
+  };
+
+  const fetchAdditionalData = async () => {
+    try {
+      // Fetch members data
+      const { data: membersData } = await db.members.getByBranch(branchId);
+      
+      // Fetch staff data
+      const { data: staffData } = await db.staff.getByBranch(branchId);
+      
+      // Fetch packages data
+      const packagesResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/branch/${branchId}`);
+      const packagesResult = await packagesResponse.json();
+      const packagesData = packagesResult.status === 'success' ? packagesResult.data : [];
+
+      // Fetch branch data
+      const { data: branchData } = await db.branches.getById(branchId);
+
+      return {
+        members: membersData || [],
+        staff: staffData || [],
+        packages: packagesData || [],
+        branch: branchData
+      };
+    } catch (error) {
+      console.error('Error fetching additional data:', error);
+      return {
+        members: [],
+        staff: [],
+        packages: [],
+        branch: null
+      };
     }
   };
 
-  const exportToCSV = () => {
-    if (!analytics) return;
+  const generateComprehensiveCSV = async (period: string) => {
+    setDownloadLoading(true);
+    
+    try {
+      const dateRange = getDateRange(period);
+      
+      // Fetch analytics data for the specific period
+      const { data: analyticsData } = await db.analytics.getBranchAnalytics(branchId, dateRange.start, dateRange.end);
+      
+      // Fetch additional data
+      const additionalData = await fetchAdditionalData();
+      
+      if (!analyticsData) {
+        throw new Error('No analytics data available');
+      }
 
-    const headers = ['Date', 'Member Name', 'Type', 'Package', 'Amount', 'Payment Method', 'Processed By', 'Status'];
-    const rows = analytics.transactions.map(t => [
-      new Date(t.date).toLocaleDateString(),
-      t.memberName,
-      t.type,
-      t.packageName,
-      t.amount.toString(),
-      t.paymentMethod,
-      t.processedBy,
-      t.memberStatus
-    ]);
+      const periodLabel = period === 'current_month' ? 'Current Month' : 
+                         period === 'past_month' ? 'Past Month' : 'Past 3 Months';
 
-    const csvContent = [headers, ...rows]
-      .map(row => row.map(field => `"${field}"`).join(','))
-      .join('\n');
+      // Generate comprehensive CSV content
+      const csvContent = generateCSVContent(analyticsData, additionalData, periodLabel, dateRange);
+      
+      // Download the CSV
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${branchName.replace(/\s+/g, '_')}_${periodLabel.replace(/\s+/g, '_')}_Analytics_Report_${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
 
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${branchName}-analytics-${new Date().toISOString().split('T')[0]}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    window.URL.revokeObjectURL(url);
+      toast({
+        title: "Download Complete",
+        description: `${periodLabel} analytics report downloaded successfully`,
+      });
 
-    toast({
-      title: "Export Complete",
-      description: "Analytics data exported to CSV successfully",
-    });
+      setShowDownloadModal(false);
+      setDownloadPeriod('');
+      
+    } catch (error) {
+      console.error('Error generating CSV:', error);
+      toast({
+        title: "Download Failed",
+        description: "Failed to generate analytics report",
+        variant: "destructive",
+      });
+    } finally {
+      setDownloadLoading(false);
+    }
   };
 
-  const exportToPDF = () => {
-    // This would typically use a library like jsPDF
-    // For now, we'll create a simple summary
-    const summaryData = analytics ? `
-Analytics Report - ${branchName}
-Period: ${new Date(analytics.period.start).toLocaleDateString()} - ${new Date(analytics.period.end).toLocaleDateString()}
+  const generateCSVContent = (analytics: AnalyticsData, additionalData: any, periodLabel: string, dateRange: any) => {
+    const { members, staff, packages, branch } = additionalData;
+    const csvRows: string[] = [];
 
-Revenue Summary:
-- Total Revenue: $${analytics.revenue.total.toFixed(2)}
-- New Memberships: $${analytics.revenue.newMemberships.toFixed(2)}
-- Renewals: $${analytics.revenue.renewals.toFixed(2)}
-- Daily Average: $${analytics.revenue.dailyAverage.toFixed(2)}
+    // Helper function to escape CSV values
+    const escapeCSV = (value: any) => {
+      if (value === null || value === undefined) return '';
+      const str = String(value);
+      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
 
-Member Analytics:
-- Total Members: ${analytics.memberAnalytics.total}
-- Active Members: ${analytics.memberAnalytics.active}
-- New This Period: ${analytics.memberAnalytics.newThisPeriod}
-- Retention Rate: ${analytics.memberAnalytics.retentionRate}%
+    // Header Section
+    csvRows.push(`FITGYM PRO - COMPREHENSIVE ANALYTICS REPORT`);
+    csvRows.push(``);
+    csvRows.push(`Branch Name,${escapeCSV(branchName)}`);
+    csvRows.push(`Report Period,${periodLabel}`);
+    csvRows.push(`Date Range,${dateRange.startFormatted} to ${dateRange.endFormatted}`);
+    csvRows.push(`Generated On,${new Date().toLocaleString()}`);
+    csvRows.push(`Total Days in Period,${analytics.timeAnalytics.totalDays}`);
+    csvRows.push(``);
 
-Top Performing Packages:
-${analytics.packagePerformance.slice(0, 3).map(p => `- ${p.name}: $${p.revenue.toFixed(2)} (${p.sales} sales)`).join('\n')}
-    ` : '';
+    // Executive Summary
+    csvRows.push(`=== EXECUTIVE SUMMARY ===`);
+    csvRows.push(`Total Revenue,$${analytics.revenue.total.toFixed(2)}`);
+    csvRows.push(`Total Members,${analytics.memberAnalytics.total}`);
+    csvRows.push(`Active Members,${analytics.memberAnalytics.active}`);
+    csvRows.push(`Total Staff,${staff.length}`);
+    csvRows.push(`Total Packages,${packages.length}`);
+    csvRows.push(`Daily Average Revenue,$${analytics.revenue.dailyAverage.toFixed(2)}`);
+    csvRows.push(`Member Retention Rate,${analytics.memberAnalytics.retentionRate}%`);
+    csvRows.push(``);
 
-    const blob = new Blob([summaryData], { type: 'text/plain' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${branchName}-analytics-summary-${new Date().toISOString().split('T')[0]}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    window.URL.revokeObjectURL(url);
+    // Revenue Analysis
+    csvRows.push(`=== REVENUE ANALYSIS ===`);
+    csvRows.push(`Category,Amount,Percentage of Total`);
+    csvRows.push(`New Memberships,$${analytics.revenue.newMemberships.toFixed(2)},${((analytics.revenue.newMemberships / analytics.revenue.total) * 100).toFixed(1)}%`);
+    csvRows.push(`Renewals,$${analytics.revenue.renewals.toFixed(2)},${((analytics.revenue.renewals / analytics.revenue.total) * 100).toFixed(1)}%`);
+    csvRows.push(`Upgrades,$${analytics.revenue.upgrades.toFixed(2)},${((analytics.revenue.upgrades / analytics.revenue.total) * 100).toFixed(1)}%`);
+    csvRows.push(`Total Revenue,$${analytics.revenue.total.toFixed(2)},100.0%`);
+    csvRows.push(``);
+    csvRows.push(`Previous Period Comparison`);
+    csvRows.push(`Previous Period Revenue,$${analytics.revenue.comparison.previous.toFixed(2)}`);
+    csvRows.push(`Change Amount,$${analytics.revenue.comparison.change.toFixed(2)}`);
+    csvRows.push(`Change Percentage,${analytics.revenue.comparison.changePercent.toFixed(1)}%`);
+    csvRows.push(``);
 
-    toast({
-      title: "Export Complete",
-      description: "Analytics summary exported successfully",
+    // Member Analytics
+    csvRows.push(`=== MEMBER ANALYTICS ===`);
+    csvRows.push(`Metric,Count,Percentage`);
+    csvRows.push(`Total Members,${analytics.memberAnalytics.total},100.0%`);
+    csvRows.push(`Active Members,${analytics.memberAnalytics.active},${((analytics.memberAnalytics.active / analytics.memberAnalytics.total) * 100).toFixed(1)}%`);
+    csvRows.push(`Expired Members,${analytics.memberAnalytics.expired},${((analytics.memberAnalytics.expired / analytics.memberAnalytics.total) * 100).toFixed(1)}%`);
+    csvRows.push(`New This Period,${analytics.memberAnalytics.newThisPeriod},${((analytics.memberAnalytics.newThisPeriod / analytics.memberAnalytics.total) * 100).toFixed(1)}%`);
+    csvRows.push(`Renewals This Period,${analytics.memberAnalytics.renewalsThisPeriod},-`);
+    csvRows.push(``);
+
+    // Package Distribution
+    csvRows.push(`=== PACKAGE DISTRIBUTION ===`);
+    csvRows.push(`Package Type,Member Count,Percentage`);
+    analytics.memberAnalytics.packageDistribution.forEach(dist => {
+      csvRows.push(`${escapeCSV(dist.type)},${dist.count},${dist.percentage.toFixed(1)}%`);
     });
+    csvRows.push(``);
+
+    // Package Performance
+    csvRows.push(`=== PACKAGE PERFORMANCE ===`);
+    csvRows.push(`Package Name,Type,Price,Total Sales,Revenue,New Memberships,Renewals`);
+    analytics.packagePerformance.forEach(pkg => {
+      csvRows.push(`${escapeCSV(pkg.name)},${escapeCSV(pkg.type)},$${pkg.price.toFixed(2)},${pkg.sales},$${pkg.revenue.toFixed(2)},${pkg.newMemberships},${pkg.renewals}`);
+    });
+    csvRows.push(``);
+
+    // Staff Performance
+    csvRows.push(`=== STAFF PERFORMANCE ===`);
+    csvRows.push(`Staff Name,Role,New Members,Renewals,Total Transactions,Revenue Generated`);
+    analytics.staffPerformance.forEach(staff => {
+      csvRows.push(`${escapeCSV(staff.name)},${escapeCSV(staff.role)},${staff.newMembers},${staff.renewals},${staff.totalTransactions},$${staff.revenue.toFixed(2)}`);
+    });
+    csvRows.push(``);
+
+    // Daily Performance
+    csvRows.push(`=== DAILY PERFORMANCE ===`);
+    csvRows.push(`Date,Revenue,Transactions,New Members,Renewals`);
+    analytics.timeAnalytics.daily.forEach(day => {
+      csvRows.push(`${day.date},$${day.revenue.toFixed(2)},${day.transactions},${day.newMembers},${day.renewals}`);
+    });
+    csvRows.push(``);
+    csvRows.push(`Peak Performance Day,${analytics.timeAnalytics.peakDay.date},$${analytics.timeAnalytics.peakDay.revenue.toFixed(2)}`);
+    csvRows.push(`Average Daily Revenue,$${analytics.timeAnalytics.averageDaily.toFixed(2)}`);
+    csvRows.push(``);
+
+    // Detailed Transactions
+    csvRows.push(`=== DETAILED TRANSACTIONS ===`);
+    csvRows.push(`Date,Member Name,Transaction Type,Package,Amount,Payment Method,Processed By,Member Status`);
+    analytics.transactions.forEach(transaction => {
+      csvRows.push(`${new Date(transaction.date).toLocaleDateString()},${escapeCSV(transaction.memberName)},${escapeCSV(transaction.type)},${escapeCSV(transaction.packageName)},$${transaction.amount.toFixed(2)},${escapeCSV(transaction.paymentMethod)},${escapeCSV(transaction.processedBy)},${escapeCSV(transaction.memberStatus)}`);
+    });
+    csvRows.push(``);
+
+    // Current Staff Directory
+    csvRows.push(`=== CURRENT STAFF DIRECTORY ===`);
+    csvRows.push(`Name,Role,Email,Phone,Joined Date,Last Active`);
+    staff.forEach((staffMember: any) => {
+      csvRows.push(`${escapeCSV(staffMember.first_name)} ${escapeCSV(staffMember.last_name)},${escapeCSV(staffMember.role)},${escapeCSV(staffMember.email)},${escapeCSV(staffMember.phone || 'N/A')},${new Date(staffMember.created_at).toLocaleDateString()},${staffMember.last_active ? new Date(staffMember.last_active).toLocaleDateString() : 'N/A'}`);
+    });
+    csvRows.push(``);
+
+    // Current Packages
+    csvRows.push(`=== CURRENT PACKAGES ===`);
+    csvRows.push(`Package Name,Type,Price,Duration (Months),Max Members,Status,Features`);
+    packages.forEach((pkg: any) => {
+      csvRows.push(`${escapeCSV(pkg.name)},${escapeCSV(pkg.type)},$${pkg.price.toFixed(2)},${pkg.duration_months},${pkg.max_members},${pkg.is_active ? 'Active' : 'Inactive'},${escapeCSV(pkg.features.join('; '))}`);
+    });
+    csvRows.push(``);
+
+    // Member Status Summary
+    csvRows.push(`=== MEMBER STATUS SUMMARY ===`);
+    const activeMembers = members.filter((m: any) => {
+      const now = new Date();
+      const expiryDate = new Date(m.expiry_date);
+      return m.status === 'active' && expiryDate > now;
+    }).length;
+    const expiredMembers = members.filter((m: any) => {
+      const now = new Date();
+      const expiryDate = new Date(m.expiry_date);
+      return m.status === 'expired' || expiryDate <= now;
+    }).length;
+    const suspendedMembers = members.filter((m: any) => m.status === 'suspended').length;
+    
+    csvRows.push(`Status,Count,Percentage`);
+    csvRows.push(`Active,${activeMembers},${members.length > 0 ? ((activeMembers / members.length) * 100).toFixed(1) : 0}%`);
+    csvRows.push(`Expired,${expiredMembers},${members.length > 0 ? ((expiredMembers / members.length) * 100).toFixed(1) : 0}%`);
+    csvRows.push(`Suspended,${suspendedMembers},${members.length > 0 ? ((suspendedMembers / members.length) * 100).toFixed(1) : 0}%`);
+    csvRows.push(``);
+
+    // Branch Information
+    csvRows.push(`=== BRANCH INFORMATION ===`);
+    if (branch) {
+      csvRows.push(`Branch ID,${escapeCSV(branch.id)}`);
+      csvRows.push(`Branch Name,${escapeCSV(branch.name)}`);
+      csvRows.push(`Location,${escapeCSV(branch.location || 'N/A')}`);
+      csvRows.push(`Phone,${escapeCSV(branch.phone || 'N/A')}`);
+      csvRows.push(`Email,${escapeCSV(branch.email || 'N/A')}`);
+      csvRows.push(`Established,${branch.created_at ? new Date(branch.created_at).toLocaleDateString() : 'N/A'}`);
+    }
+    csvRows.push(``);
+
+    // Footer
+    csvRows.push(`=== REPORT END ===`);
+    csvRows.push(`This report was generated by FitGym Pro Analytics System`);
+    csvRows.push(`Report contains ${analytics.transactions.length} transactions, ${members.length} members, ${staff.length} staff, and ${packages.length} packages`);
+
+    return csvRows.join('\n');
   };
 
   const formatCurrency = (amount: number) => `$${amount.toFixed(2)}`;
@@ -303,14 +498,106 @@ ${analytics.packagePerformance.slice(0, 3).map(p => `- ${p.name}: $${p.revenue.t
           <p className="text-muted-foreground">Financial and operational insights for {branchName}</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => handleExportData('csv')}>
-            <Download className="h-4 w-4 mr-2" />
-            CSV
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => handleExportData('pdf')}>
-            <FileText className="h-4 w-4 mr-2" />
-            Summary
-          </Button>
+          <Dialog open={showDownloadModal} onOpenChange={setShowDownloadModal}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Download className="h-4 w-4 mr-2" />
+                Download Report
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <FileText className="h-5 w-5" />
+                  Download Analytics Report
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2 text-blue-800 font-medium mb-2">
+                    <BarChart3 className="h-4 w-4" />
+                    Comprehensive Analytics Report
+                  </div>
+                  <p className="text-sm text-blue-600">
+                    Download a detailed CSV report including revenue, members, staff, packages, and all analytics data for {branchName}.
+                  </p>
+                </div>
+
+                <div>
+                  <Label htmlFor="downloadPeriod">Select Report Period</Label>
+                  <Select value={downloadPeriod} onValueChange={setDownloadPeriod}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Choose time period" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="current_month">
+                        <div className="flex items-center gap-2">
+                          <CalendarDays className="h-4 w-4" />
+                          Current Month Analytics
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="past_month">
+                        <div className="flex items-center gap-2">
+                          <Calendar className="h-4 w-4" />
+                          Past Month Analytics
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="past_3_months">
+                        <div className="flex items-center gap-2">
+                          <TrendingUp className="h-4 w-4" />
+                          Past 3 Months Analytics
+                        </div>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {downloadPeriod && (
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                    <h4 className="font-medium text-green-800 mb-2">Report will include:</h4>
+                    <ul className="text-sm text-green-700 space-y-1">
+                      <li>• Executive summary and key metrics</li>
+                      <li>• Revenue analysis and comparisons</li>
+                      <li>• Member analytics and distribution</li>
+                      <li>• Package and staff performance</li>
+                      <li>• Daily performance data</li>
+                      <li>• Detailed transaction records</li>
+                      <li>• Current staff and package directories</li>
+                      <li>• Branch information and statistics</li>
+                    </ul>
+                  </div>
+                )}
+
+                <div className="flex gap-2 pt-4">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => setShowDownloadModal(false)}
+                    className="flex-1"
+                    disabled={downloadLoading}
+                  >
+                    Cancel
+                  </Button>
+                  <Button 
+                    onClick={() => generateComprehensiveCSV(downloadPeriod)}
+                    disabled={!downloadPeriod || downloadLoading}
+                    className="flex-1"
+                  >
+                    {downloadLoading ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                        Generating...
+                      </>
+                    ) : (
+                      <>
+                        <Download className="h-4 w-4 mr-2" />
+                        Download CSV
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
           <Button variant="outline" size="sm" onClick={fetchAnalytics}>
             <RefreshCw className="h-4 w-4 mr-2" />
             Refresh
