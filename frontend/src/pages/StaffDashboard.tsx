@@ -32,7 +32,8 @@ import {
   Trash2,
   Package as PackageIcon,
   XCircle,
-  Edit
+  Edit,
+  BarChart3
 } from 'lucide-react';
 import { db } from '@/lib/supabase';
 import { AddNewMemberModal } from '@/components/staff/AddNewMemberModal';
@@ -41,6 +42,7 @@ import { ViewMemberModal } from '@/components/staff/ViewMemberModal';
 import RenewMemberModal from '@/components/staff/RenewMemberModal';
 import { StaffManagement } from '@/components/staff/StaffManagement';
 import StaffAuthModal from '@/components/staff/StaffAuthModal';
+import AnalyticsTab from '@/components/staff/AnalyticsTab';
 import { useToast } from '@/hooks/use-toast';
 import type { Branch, Member, BranchStaff, Package } from '@/types';
 
@@ -843,10 +845,11 @@ const StaffDashboard = () => {
 
         {/* Main Content */}
         <Tabs defaultValue="members" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3 lg:w-96">
+          <TabsList className="grid w-full grid-cols-4 lg:w-auto">
             <TabsTrigger value="members">Members</TabsTrigger>
             <TabsTrigger value="packages">Packages</TabsTrigger>
             <TabsTrigger value="staff">Staff</TabsTrigger>
+            <TabsTrigger value="analytics">Analytics</TabsTrigger>
           </TabsList>
 
           <TabsContent value="members" className="space-y-6">
@@ -1250,6 +1253,10 @@ const StaffDashboard = () => {
                 });
               }
             }} />
+          </TabsContent>
+
+          <TabsContent value="analytics" className="space-y-6">
+            <AnalyticsTab branchId={branchId!} branchName={branch?.name || 'Branch'} />
           </TabsContent>
         </Tabs>
 

@@ -11,6 +11,7 @@ import { memberRoutes } from './routes/members';
 import { packageRoutes } from './routes/packages';
 import { branchRoutes } from './routes/branches';
 import { renewalRoutes } from './routes/renewals';
+import { analyticsRoutes } from './routes/analytics';
 
 // Load environment variables
 dotenv.config();
@@ -44,15 +45,16 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// API Routes - ENHANCED WITH ALL ROUTES INCLUDING BRANCH-SPECIFIC PACKAGES
+// API Routes - ENHANCED WITH ALL ROUTES INCLUDING ANALYTICS
 console.log('🔧 Registering API routes...');
 app.use('/api/auth', authRoutes);
 app.use('/api/staff', staffRoutes);
 app.use('/api/members', memberRoutes);
-app.use('/api/packages', packageRoutes); // Now supports branch-specific packages
+app.use('/api/packages', packageRoutes);
 app.use('/api/branches', branchRoutes);
 app.use('/api/renewals', renewalRoutes);
-console.log('✅ Routes registered: /api/auth, /api/staff, /api/members, /api/packages, /api/branches, /api/renewals');
+app.use('/api/analytics', analyticsRoutes);
+console.log('✅ Routes registered: /api/auth, /api/staff, /api/members, /api/packages, /api/branches, /api/renewals, /api/analytics');
 
 // Test endpoint for debugging
 app.get('/api/test', (req, res) => {
@@ -99,7 +101,9 @@ app.get('/api/test', (req, res) => {
       'POST /api/renewals/process',
       'GET /api/renewals/member/:memberId',
       'GET /api/renewals/recent/:branchId',
-      'GET /api/renewals/eligibility/:memberId'
+      'GET /api/renewals/eligibility/:memberId',
+      '--- ANALYTICS ROUTES ---',
+      'GET /api/analytics/branch/:branchId'
     ]
   });
 });
@@ -135,6 +139,7 @@ app.listen(PORT, () => {
   console.log(`🌐 API Health: http://localhost:${PORT}/api/health`);
   console.log(`🔐 Authentication: Enhanced with Supabase`);
   console.log(`📦 Packages: Branch-specific management enabled`);
+  console.log(`📊 Analytics: Revenue and performance tracking enabled`);
   console.log(`🧪 Test routes: http://localhost:${PORT}/api/test`);
 });
 

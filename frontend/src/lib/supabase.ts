@@ -601,6 +601,39 @@ export const db = {
     getAll: () => supabase.from('staff_actions_log').select('*, branch_staff(first_name, last_name), members(first_name, last_name)').order('created_at', { ascending: false }),
   },
 
+  // Analytics - NEW - THIS IS THE MISSING SECTION!
+  analytics: {
+    getBranchAnalytics: async (branchId: string, startDate?: string, endDate?: string) => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+        
+        let url = `${API_BASE_URL}/analytics/branch/${branchId}`;
+        const params = new URLSearchParams();
+        
+        if (startDate) params.append('startDate', startDate);
+        if (endDate) params.append('endDate', endDate);
+        
+        if (params.toString()) {
+          url += `?${params.toString()}`;
+        }
+        
+        console.log('🔍 Fetching analytics from:', url);
+        
+        const response = await fetch(url);
+        const result = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to fetch analytics');
+        }
+        
+        return { data: result.data, error: null };
+      } catch (error) {
+        console.error('Error fetching analytics:', error);
+        return { data: null, error: error instanceof Error ? error : new Error('Unknown error') };
+      }
+    },
+  },
+
   // Users - UNCHANGED
   users: {
     getById: (id: string) => supabase.from('users').select('*').eq('id', id).single(),
