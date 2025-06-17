@@ -63,7 +63,9 @@ const StaffDashboard = () => {
   const [showAddExisting, setShowAddExisting] = useState(false);
   const [showViewMember, setShowViewMember] = useState(false);
   const [showRenewMember, setShowRenewMember] = useState(false);
-  const [showAuthModal, setShowAuthModal] = useState(true);
+  
+  // FIXED: Start with false and only show if no valid session exists
+  const [showAuthModal, setShowAuthModal] = useState(false);
   const [authenticatedStaff, setAuthenticatedStaff] = useState<any>(null);
   const [loginMethod, setLoginMethod] = useState<'pin' | 'credentials' | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -127,7 +129,10 @@ const StaffDashboard = () => {
     return diffDays;
   };
 
+  // FIXED: Better session detection and authentication flow
   useEffect(() => {
+    console.log('🔍 StaffDashboard: Checking authentication state...');
+    
     // Check if user came from branch credential login
     const branchSession = localStorage.getItem('branch_session');
     const locationState = location.state;
@@ -138,6 +143,8 @@ const StaffDashboard = () => {
         console.log('🏢 Found branch session:', sessionData);
         
         if (sessionData.branchId === branchId && sessionData.userType === 'branch_staff') {
+          console.log('✅ Valid branch session found, auto-authenticating...');
+          
           // Auto-authenticate with branch credentials
           setAuthenticatedStaff({
             id: 'branch_staff',
@@ -151,6 +158,10 @@ const StaffDashboard = () => {
           setLoginMethod('credentials');
           setShowAuthModal(false);
           console.log('✅ Auto-authenticated via branch credentials');
+          return; // Exit early, don't show auth modal
+        } else {
+          console.log('⚠️ Branch session branch ID mismatch or invalid type');
+          localStorage.removeItem('branch_session'); // Clear invalid session
         }
       } catch (error) {
         console.error('❌ Error parsing branch session:', error);
@@ -172,11 +183,19 @@ const StaffDashboard = () => {
       });
       setLoginMethod('credentials');
       setShowAuthModal(false);
+      return; // Exit early, don't show auth modal
     }
+    
+    // If no valid session found, show auth modal
+    console.log('❌ No valid authentication found, showing auth modal');
+    setShowAuthModal(true);
+    
   }, [branchId, location.state]);
 
+  // FIXED: Only fetch data when we have authenticated staff
   useEffect(() => {
     if (authenticatedStaff && branchId) {
+      console.log('📊 Authenticated staff found, fetching dashboard data...');
       fetchData();
     }
   }, [branchId, authenticatedStaff]);
@@ -384,15 +403,51 @@ const StaffDashboard = () => {
     }
   };
 
+  // FIXED: Updated handleAuthentication function
   const handleAuthentication = (staff: any) => {
+    console.log('🔐 PIN authentication successful:', staff);
     setAuthenticatedStaff(staff);
     setLoginMethod('pin');
     setShowAuthModal(false);
+    
+    // FIXED: Update the branch session to include PIN auth info
+    const existingSession = localStorage.getItem('branch_session');
+    if (existingSession) {
+      try {
+        const sessionData = JSON.parse(existingSession);
+        sessionData.staffInfo = staff;
+        sessionData.authMethod = 'pin';
+        localStorage.setItem('branch_session', JSON.stringify(sessionData));
+        // Notify navbar of the update
+        window.dispatchEvent(new Event('storage'));
+      } catch (error) {
+        console.error('Error updating session with staff info:', error);
+      }
+    } else {
+      // Create new session for PIN auth
+      const sessionData = {
+        sessionToken: `pin_${Date.now()}`,
+        branchId: branchId,
+        branchName: branch?.name || 'Unknown Branch',
+        branchEmail: staff.email,
+        loginTime: new Date().toISOString(),
+        userType: 'branch_staff',
+        authMethod: 'pin',
+        staffInfo: staff
+      };
+      localStorage.setItem('branch_session', JSON.stringify(sessionData));
+      window.dispatchEvent(new Event('storage'));
+    }
   };
 
   const handleLogout = () => {
+    console.log('🔐 Logging out from staff dashboard...');
+    
     // Clear branch session if exists
     localStorage.removeItem('branch_session');
+    
+    // Notify navbar immediately
+    window.dispatchEvent(new Event('storage'));
     
     // Reset authentication state
     setAuthenticatedStaff(null);
@@ -643,27 +698,37 @@ const StaffDashboard = () => {
 
   const stats = getStatsData();
 
-  if (showAuthModal || !authenticatedStaff) {
+  // FIXED: Better loading state management
+  if (!authenticatedStaff) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
-        <StaffAuthModal
-          isOpen={showAuthModal}
-          onClose={() => setShowAuthModal(false)}
-          onAuthenticated={handleAuthentication}
-          branchId={branchId || ''}
-        />
-        <div className="text-center">
-          <Shield className="h-12 w-12 mx-auto mb-4 text-primary" />
-          <h2 className="text-2xl font-bold mb-2">Staff Authentication Required</h2>
-          <p className="text-muted-foreground">Please authenticate to access the staff dashboard</p>
-          <Button 
-            variant="outline" 
-            className="mt-4"
-            onClick={() => window.location.href = '/login'}
-          >
-            ← Back to Login
-          </Button>
-        </div>
+        {showAuthModal ? (
+          <>
+            <StaffAuthModal
+              isOpen={showAuthModal}
+              onClose={() => setShowAuthModal(false)}
+              onAuthenticated={handleAuthentication}
+              branchId={branchId || ''}
+            />
+            <div className="text-center">
+              <Shield className="h-12 w-12 mx-auto mb-4 text-primary" />
+              <h2 className="text-2xl font-bold mb-2">Staff Authentication Required</h2>
+              <p className="text-muted-foreground">Please authenticate to access the staff dashboard</p>
+              <Button 
+                variant="outline" 
+                className="mt-4"
+                onClick={() => window.location.href = '/login'}
+              >
+                ← Back to Login
+              </Button>
+            </div>
+          </>
+        ) : (
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Loading dashboard...</p>
+          </div>
+        )}
       </div>
     );
   }

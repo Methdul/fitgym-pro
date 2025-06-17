@@ -26,6 +26,49 @@ const Login = () => {
     { role: 'Branch Staff', email: 'staff@downtown.fitgym.com', password: 'branch123', type: 'branch' },
   ];
 
+  // FIXED: Helper function to create persistent branch session
+  const createBranchSession = (branchInfo: any, sessionToken: string, email: string) => {
+    const sessionData = {
+      sessionToken: sessionToken,
+      branchId: branchInfo.id,
+      branchName: branchInfo.name,
+      branchEmail: email,
+      loginTime: new Date().toISOString(),
+      userType: 'branch_staff',
+      isAuthenticated: true, // ADDED: Explicit authentication flag
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // ADDED: 24 hour expiration
+    };
+
+    console.log('💾 Creating persistent branch session:', sessionData);
+    
+    // Store session in localStorage
+    localStorage.setItem('branch_session', JSON.stringify(sessionData));
+    
+    // FIXED: Dispatch multiple events to ensure navbar updates
+    window.dispatchEvent(new Event('storage'));
+    window.dispatchEvent(new CustomEvent('branchSessionUpdated', { detail: sessionData }));
+    
+    // FIXED: Also store a backup flag for quick detection
+    sessionStorage.setItem('branch_logged_in', 'true');
+    
+    return sessionData;
+  };
+
+  // Helper function to wait for auth state to update
+  const waitForAuthUpdate = (maxWait = 2000) => {
+    return new Promise<void>((resolve) => {
+      const startTime = Date.now();
+      const checkAuth = () => {
+        if (Date.now() - startTime > maxWait) {
+          resolve(); // Timeout, proceed anyway
+          return;
+        }
+        setTimeout(() => resolve(), 300); // Give auth context time to update
+      };
+      checkAuth();
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -77,6 +120,8 @@ const Login = () => {
             .single();
 
           if (newProfile) {
+            console.log('⏳ Waiting for auth state to update...');
+            await waitForAuthUpdate();
             redirectByUserRole(newProfile.role);
           } else {
             setError('Could not fetch user profile');
@@ -85,6 +130,8 @@ const Login = () => {
         }
 
         if (userProfile) {
+          console.log('⏳ Waiting for auth state to update...');
+          await waitForAuthUpdate();
           redirectByUserRole(userProfile.role);
         } else {
           setError('User profile not found');
@@ -96,10 +143,9 @@ const Login = () => {
       console.log('📝 Regular login failed, trying branch credentials...');
       console.log('🏢 Attempting branch staff login...');
       
-      // FIXED: Correct parameter names and response handling
       const { data: branchData, error: branchError } = await supabase.rpc('authenticate_branch_login', {
         p_branch_email: email,
-        p_password: password  // FIXED: was p_branch_password, now p_password
+        p_password: password
       });
 
       if (branchError) {
@@ -108,7 +154,6 @@ const Login = () => {
         return;
       }
 
-      // FIXED: Function returns array of rows, get first row
       const result = branchData?.[0];
       if (!result || !result.success) {
         console.error('❌ Branch login failed:', result?.error_message || 'Unknown error');
@@ -119,28 +164,24 @@ const Login = () => {
       console.log('✅ Branch login successful:', result.branch_data);
       setLoginType('branch');
 
-      // Store branch session info in localStorage for the staff dashboard
+      // FIXED: Create persistent branch session
       const branchInfo = result.branch_data;
-      const sessionData = {
-        sessionToken: result.session_token,
-        branchId: branchInfo.id,
-        branchName: branchInfo.name,
-        branchEmail: email,
-        loginTime: new Date().toISOString(),
-        userType: 'branch_staff'
-      };
-
-      localStorage.setItem('branch_session', JSON.stringify(sessionData));
+      const sessionData = createBranchSession(branchInfo, result.session_token, email);
+      
+      // FIXED: Small delay to ensure session is properly stored and detected
+      console.log('⏳ Ensuring session persistence...');
+      await new Promise(resolve => setTimeout(resolve, 500));
       
       console.log('🚀 Redirecting to branch dashboard for branch:', branchInfo.id);
 
       // Redirect to staff dashboard with branch ID
-      navigate(`/dashboard/staff/${branchInfo.id}`, {  // ← FIXED PATH
+      navigate(`/dashboard/staff/${branchInfo.id}`, {
         replace: true,
         state: { 
           authenticated: true, 
           branchData: branchInfo,
-          sessionToken: result.session_token
+          sessionToken: result.session_token,
+          sessionData: sessionData // ADDED: Pass session data in state
         }
       });
 
@@ -306,14 +347,14 @@ const Login = () => {
               
               <div className="text-center text-xs text-muted-foreground border-t pt-3">
                 <p>💡 <strong>User accounts:</strong> Access admin or member dashboards</p>
-                <p>🏢 <strong>Branch credentials:</strong> Access branch staff dashboard</p>
+                <p>🏢 <strong>Branch credentials:</strong> Access branch staff dashboard with persistent session</p>
               </div>
             </div>
 
             {/* Debug Info (remove in production) */}
             {process.env.NODE_ENV === 'development' && (
               <div className="text-xs text-muted-foreground text-center space-y-1">
-                <p>Debug: Check browser console for detailed login logs</p>
+                <p>Debug: Branch sessions now persist across navigation</p>
                 <p>System will try user login first, then branch login if that fails</p>
               </div>
             )}

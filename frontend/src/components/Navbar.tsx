@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { 
   DropdownMenu, 
@@ -22,52 +22,120 @@ interface BranchSession {
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [branchSession, setBranchSession] = useState<BranchSession | null>(null);
+  const [sessionChecked, setSessionChecked] = useState(false);
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
-  // Check for branch session on mount and storage changes
-  useEffect(() => {
-    const checkBranchSession = () => {
+  // FIXED: More robust branch session checking
+  const checkBranchSession = useCallback(() => {
+    try {
       const sessionData = localStorage.getItem('branch_session');
+      console.log('🔍 Navbar checking branch session:', sessionData ? 'found' : 'not found');
+      
       if (sessionData) {
-        try {
-          const session = JSON.parse(sessionData);
-          setBranchSession(session);
-        } catch (error) {
-          console.error('Invalid branch session data:', error);
+        const session = JSON.parse(sessionData);
+        console.log('📧 Branch session data:', session);
+        
+        // Validate session structure
+        if (session.branchId && session.branchEmail && session.userType === 'branch_staff') {
+          // Check if session is not too old (24 hours)
+          const loginTime = new Date(session.loginTime);
+          const now = new Date();
+          const hoursDiff = (now.getTime() - loginTime.getTime()) / (1000 * 60 * 60);
+          
+          if (hoursDiff < 24) { // Session valid for 24 hours
+            console.log('✅ Valid branch session found:', session.branchEmail);
+            setBranchSession(session);
+            setSessionChecked(true);
+            return;
+          } else {
+            console.log('⏰ Branch session expired, removing...');
+            localStorage.removeItem('branch_session');
+          }
+        } else {
+          console.log('❌ Invalid branch session structure, removing...');
           localStorage.removeItem('branch_session');
-          setBranchSession(null);
         }
-      } else {
-        setBranchSession(null);
       }
-    };
-
-    // Check on mount
-    checkBranchSession();
-
-    // Listen for storage changes (in case user logs out from another tab)
-    window.addEventListener('storage', checkBranchSession);
-    
-    // Check periodically in case localStorage changes from same tab
-    const interval = setInterval(checkBranchSession, 1000);
-
-    return () => {
-      window.removeEventListener('storage', checkBranchSession);
-      clearInterval(interval);
-    };
+      
+      // No valid session found
+      setBranchSession(null);
+      setSessionChecked(true);
+    } catch (error) {
+      console.error('❌ Error checking branch session:', error);
+      localStorage.removeItem('branch_session');
+      setBranchSession(null);
+      setSessionChecked(true);
+    }
   }, []);
 
+  // FIXED: Check session immediately on mount and route changes
+  useEffect(() => {
+    console.log('🔄 Navbar effect triggered by route change:', location.pathname);
+    checkBranchSession();
+  }, [checkBranchSession, location.pathname]);
+
+  // FIXED: Listen for storage changes from same tab and other tabs
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent | CustomEvent) => {
+      console.log('📡 Storage change detected in navbar');
+      if (e instanceof StorageEvent && e.key !== 'branch_session') {
+        return; // Only care about branch_session changes
+      }
+      setTimeout(checkBranchSession, 100); // Small delay to ensure localStorage is updated
+    };
+
+    const handleCustomStorageChange = () => {
+      console.log('📡 Custom storage event detected in navbar');
+      setTimeout(checkBranchSession, 100);
+    };
+
+    // Listen for storage events from other tabs
+    window.addEventListener('storage', handleStorageChange);
+    
+    // Listen for custom storage events from same tab
+    window.addEventListener('storage', handleCustomStorageChange);
+    window.addEventListener('branchSessionUpdated', handleCustomStorageChange);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('storage', handleCustomStorageChange);
+      window.addEventListener('branchSessionUpdated', handleCustomStorageChange);
+    };
+  }, [checkBranchSession]);
+
+  // FIXED: Prevent user auth from clearing branch session
+  useEffect(() => {
+    if (user && branchSession) {
+      console.log('⚠️ Both user and branch session exist, keeping branch session');
+      // Don't clear branch session when user logs in
+      // Let user choose which one to use
+    }
+  }, [user, branchSession]);
+
   const handleSignOut = async () => {
-    // Sign out from regular auth
-    await signOut();
-    navigate('/');
+    console.log('🔐 Signing out user...');
+    try {
+      await signOut();
+      navigate('/');
+    } catch (error) {
+      console.error('Error signing out:', error);
+    }
   };
 
   const handleBranchLogout = () => {
+    console.log('🔐 Logging out branch session...');
+    
     // Clear branch session
     localStorage.removeItem('branch_session');
     setBranchSession(null);
+    
+    // Dispatch custom event to notify other components
+    window.dispatchEvent(new CustomEvent('branchSessionUpdated'));
+    window.dispatchEvent(new Event('storage'));
+    
+    // Navigate to home
     navigate('/');
   };
 
@@ -78,14 +146,37 @@ const Navbar = () => {
     { name: 'Partnerships', path: '/partnerships' },
   ];
 
-  // Determine current user type and display info
-  const isLoggedIn = user || branchSession;
-  const currentUserEmail = user?.email || branchSession?.branchEmail;
+  // FIXED: Better logic for determining login state
+  const isLoggedIn = Boolean(user || branchSession);
+  const currentUserEmail = user?.email || branchSession?.branchEmail || '';
   const currentUserType = user ? 'user' : branchSession ? 'branch' : null;
+
+  // FIXED: Better user display info with validation
+  const getCurrentUserDisplayInfo = () => {
+    if (user?.email) {
+      return {
+        email: user.email,
+        subtitle: null,
+        type: 'user' as const
+      };
+    } else if (branchSession?.branchEmail) {
+      return {
+        email: branchSession.branchEmail,
+        subtitle: branchSession.branchName || 'Branch Staff',
+        type: 'branch' as const
+      };
+    }
+    return {
+      email: '',
+      subtitle: null,
+      type: null as const
+    };
+  };
+
+  const userDisplayInfo = getCurrentUserDisplayInfo();
 
   const getDashboardPath = () => {
     if (user) {
-      // Check user role from profile (you might want to get this from your user profile)
       return user.email?.includes('admin') ? '/admin' : '/member';
     } else if (branchSession) {
       return `/dashboard/staff/${branchSession.branchId}`;
@@ -113,6 +204,42 @@ const Navbar = () => {
 
   const UserIcon = getUserIcon();
 
+  // FIXED: Debug logging for development
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log('📊 Navbar state update:', {
+        user: user?.email || 'none',
+        branchSession: branchSession?.branchEmail || 'none',
+        isLoggedIn,
+        currentUserEmail,
+        currentUserType,
+        userDisplayEmail: userDisplayInfo.email,
+        sessionChecked
+      });
+    }
+  }, [user, branchSession, isLoggedIn, currentUserEmail, currentUserType, userDisplayInfo.email, sessionChecked]);
+
+  // Show loading state until session is checked
+  if (!sessionChecked) {
+    return (
+      <nav className="sticky top-0 z-50 glassmorphism">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between h-16">
+            <div className="flex items-center">
+              <Link to="/" className="flex items-center space-x-2">
+                <Dumbbell className="h-8 w-8 text-primary" />
+                <span className="text-xl font-bold">FitGym Pro</span>
+              </Link>
+            </div>
+            <div className="flex items-center">
+              <div className="animate-pulse h-8 w-20 bg-muted rounded"></div>
+            </div>
+          </div>
+        </div>
+      </nav>
+    );
+  }
+
   return (
     <nav className="sticky top-0 z-50 glassmorphism">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -139,16 +266,16 @@ const Navbar = () => {
 
           {/* Auth Section */}
           <div className="hidden md:flex items-center space-x-4">
-            {isLoggedIn ? (
+            {isLoggedIn && userDisplayInfo.email ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="flex items-center space-x-2">
                     <UserIcon className="h-4 w-4" />
                     <div className="flex flex-col items-start">
-                      <span className="text-sm">{currentUserEmail}</span>
-                      {branchSession && (
+                      <span className="text-sm">{userDisplayInfo.email}</span>
+                      {userDisplayInfo.subtitle && (
                         <span className="text-xs text-muted-foreground">
-                          {branchSession.branchName}
+                          {userDisplayInfo.subtitle}
                         </span>
                       )}
                     </div>
@@ -205,17 +332,17 @@ const Navbar = () => {
               </Link>
             ))}
             <div className="pt-4 border-t border-border">
-              {isLoggedIn ? (
+              {isLoggedIn && userDisplayInfo.email ? (
                 <div className="space-y-2">
                   {/* User Info Display */}
                   <div className="px-3 py-2 text-sm">
                     <div className="flex items-center space-x-2">
                       <UserIcon className="h-4 w-4" />
                       <div>
-                        <div className="font-medium">{currentUserEmail}</div>
-                        {branchSession && (
+                        <div className="font-medium">{userDisplayInfo.email}</div>
+                        {userDisplayInfo.subtitle && (
                           <div className="text-xs text-muted-foreground">
-                            {branchSession.branchName}
+                            {userDisplayInfo.subtitle}
                           </div>
                         )}
                       </div>
