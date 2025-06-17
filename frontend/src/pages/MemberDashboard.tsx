@@ -1,23 +1,20 @@
-
 import { useState, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { User, CreditCard, Calendar, MessageSquare, CheckCircle, AlertTriangle } from 'lucide-react';
+import { User, CreditCard, Calendar, Settings, AlertTriangle } from 'lucide-react';
 import MemberProfile from '@/components/member/MemberProfile';
 import MemberMembership from '@/components/member/MemberMembership';
-import MemberCheckIns from '@/components/member/MemberCheckIns';
-import MemberReports from '@/components/member/MemberReports';
-import MemberCheckIn from '@/components/member/MemberCheckIn';
+import { VerificationBanner } from '@/components/VerificationBanner';
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/supabase';
 import { Member } from '@/types';
 
 const MemberDashboard = () => {
   const [member, setMember] = useState<Member | null>(null);
-  const [branches, setBranches] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
+  const [verificationStatus, setVerificationStatus] = useState<any>(null);
   const { toast } = useToast();
 
   // Mock member ID - in real app, this would come from authentication
@@ -25,7 +22,12 @@ const MemberDashboard = () => {
 
   useEffect(() => {
     fetchMemberData();
-    fetchBranches();
+    
+    // Get verification status from localStorage
+    const status = localStorage.getItem('user_verification_status');
+    if (status) {
+      setVerificationStatus(JSON.parse(status));
+    }
   }, []);
 
   const fetchMemberData = async () => {
@@ -61,16 +63,6 @@ const MemberDashboard = () => {
       });
     } finally {
       setLoading(false);
-    }
-  };
-
-  const fetchBranches = async () => {
-    try {
-      const { data, error } = await db.branches.getAll();
-      if (error) throw error;
-      setBranches(data || []);
-    } catch (error) {
-      console.error('Error fetching branches:', error);
     }
   };
 
@@ -124,7 +116,7 @@ const MemberDashboard = () => {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold">Welcome back, {member.first_name}!</h1>
-            <p className="text-muted-foreground">Manage your membership and track your fitness journey</p>
+            <p className="text-muted-foreground">Manage your membership and profile</p>
           </div>
           <div className="flex items-center gap-4">
             <Badge className={getStatusColor(member.status)}>
@@ -135,6 +127,17 @@ const MemberDashboard = () => {
             </Badge>
           </div>
         </div>
+
+        {/* Verification Banner */}
+        {verificationStatus && !verificationStatus.isVerified && (
+          <VerificationBanner 
+            userEmail={verificationStatus.email}
+            isVerified={verificationStatus.isVerified}
+            onVerificationComplete={() => {
+              setVerificationStatus(prev => ({ ...prev, isVerified: true }));
+            }}
+          />
+        )}
 
         {/* Quick Stats */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -185,7 +188,7 @@ const MemberDashboard = () => {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Member Since</CardTitle>
-              <CheckCircle className="h-4 w-4 text-muted-foreground" />
+              <Calendar className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
@@ -215,15 +218,12 @@ const MemberDashboard = () => {
           </Card>
         )}
 
-        {/* Main Content */}
+        {/* Main Content - Simplified Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-6">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="profile">Profile</TabsTrigger>
             <TabsTrigger value="membership">Membership</TabsTrigger>
-            <TabsTrigger value="checkin">Check-In</TabsTrigger>
-            <TabsTrigger value="history">History</TabsTrigger>
-            <TabsTrigger value="reports">Reports</TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview" className="space-y-6">
@@ -231,18 +231,18 @@ const MemberDashboard = () => {
               <Card>
                 <CardHeader>
                   <CardTitle>Quick Actions</CardTitle>
-                  <CardDescription>Common member tasks</CardDescription>
+                  <CardDescription>Manage your account</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <button 
-                    onClick={() => setActiveTab('checkin')} 
+                    onClick={() => setActiveTab('profile')} 
                     className="w-full p-3 text-left border rounded-lg hover:bg-muted transition-colors"
                   >
                     <div className="flex items-center gap-3">
-                      <CheckCircle className="h-5 w-5 text-green-600" />
+                      <User className="h-5 w-5 text-blue-600" />
                       <div>
-                        <p className="font-medium">Check In to Gym</p>
-                        <p className="text-sm text-muted-foreground">Log your gym visit today</p>
+                        <p className="font-medium">Update Profile</p>
+                        <p className="text-sm text-muted-foreground">Edit your personal information</p>
                       </div>
                     </div>
                   </button>
@@ -252,7 +252,7 @@ const MemberDashboard = () => {
                     className="w-full p-3 text-left border rounded-lg hover:bg-muted transition-colors"
                   >
                     <div className="flex items-center gap-3">
-                      <CreditCard className="h-5 w-5 text-blue-600" />
+                      <CreditCard className="h-5 w-5 text-green-600" />
                       <div>
                         <p className="font-medium">View Membership Details</p>
                         <p className="text-sm text-muted-foreground">Check your package and renewals</p>
@@ -260,18 +260,15 @@ const MemberDashboard = () => {
                     </div>
                   </button>
                   
-                  <button 
-                    onClick={() => setActiveTab('reports')} 
-                    className="w-full p-3 text-left border rounded-lg hover:bg-muted transition-colors"
-                  >
+                  <div className="w-full p-3 border rounded-lg bg-muted/30">
                     <div className="flex items-center gap-3">
-                      <MessageSquare className="h-5 w-5 text-purple-600" />
+                      <Settings className="h-5 w-5 text-gray-600" />
                       <div>
-                        <p className="font-medium">Submit Report</p>
-                        <p className="text-sm text-muted-foreground">Report issues or feedback</p>
+                        <p className="font-medium">Account Settings</p>
+                        <p className="text-sm text-muted-foreground">Password, email & security settings</p>
                       </div>
                     </div>
-                  </button>
+                  </div>
                 </CardContent>
               </Card>
 
@@ -294,8 +291,18 @@ const MemberDashboard = () => {
                     <span className="text-sm font-bold">${member.package_price}</span>
                   </div>
                   <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium">Start Date:</span>
+                    <span className="text-sm">{new Date(member.start_date).toLocaleDateString()}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
                     <span className="text-sm font-medium">Expires:</span>
                     <span className="text-sm">{new Date(member.expiry_date).toLocaleDateString()}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium">Account Status:</span>
+                    <Badge variant={member.is_verified ? "default" : "secondary"}>
+                      {member.is_verified ? "Verified" : "Unverified"}
+                    </Badge>
                   </div>
                 </CardContent>
               </Card>
@@ -308,18 +315,6 @@ const MemberDashboard = () => {
 
           <TabsContent value="membership">
             <MemberMembership member={member} onMemberUpdate={handleMemberUpdate} />
-          </TabsContent>
-
-          <TabsContent value="checkin">
-            <MemberCheckIn memberId={member.id} branches={branches} />
-          </TabsContent>
-
-          <TabsContent value="history">
-            <MemberCheckIns memberId={member.id} />
-          </TabsContent>
-
-          <TabsContent value="reports">
-            <MemberReports memberId={member.id} />
           </TabsContent>
         </Tabs>
       </div>
