@@ -19,7 +19,7 @@ router.get('/branch/:branchId', optionalAuth, async (req, res) => {
       .from('packages')
       .select('*')
       .eq('branch_id', req.params.branchId)
-      .order('price');
+      .order('max_members', { ascending: true });
     
     if (error) {
       console.error('Database error:', error);
@@ -52,7 +52,7 @@ router.get('/branch/:branchId/active', optionalAuth, async (req, res) => {
       .select('*')
       .eq('branch_id', req.params.branchId)
       .eq('is_active', true)
-      .order('price');
+      .order('max_members', { ascending: true });
     
     if (error) {
       console.error('Database error:', error);
@@ -75,7 +75,7 @@ router.get('/branch/:branchId/active', optionalAuth, async (req, res) => {
   }
 });
 
-// Get all active packages (public access) - ADMIN ONLY NOW
+// Get all active packages (admin only)
 router.get('/active', authenticate, async (req, res) => {
   try {
     console.log('📦 Getting all active packages (admin)');
@@ -84,7 +84,7 @@ router.get('/active', authenticate, async (req, res) => {
       .from('packages')
       .select('*, branches(name)')
       .eq('is_active', true)
-      .order('price');
+      .order('max_members', { ascending: true });
     
     if (error) {
       console.error('Database error:', error);
@@ -115,7 +115,7 @@ router.get('/', authenticate, async (req, res) => {
     const { data, error } = await supabase
       .from('packages')
       .select('*, branches(name)')
-      .order('price');
+      .order('max_members', { ascending: true });
     
     if (error) throw error;
     
@@ -171,33 +171,111 @@ router.get('/:id', optionalAuth, async (req, res) => {
   }
 });
 
-// Create new package (with branch_id)
+// Create new package (with improved error handling)
 router.post('/', authenticate, async (req, res) => {
   try {
-    console.log('➕ Creating new package:', req.body);
+    console.log('➕ Creating new package with data:', req.body);
     
-    const { branch_id, name, type, price, duration_months, features, is_active = true } = req.body;
+    const { branch_id, name, type, price, duration_months, max_members, features, is_active = true } = req.body;
 
-    // Validation
-    if (!branch_id || !name || !type || price === undefined || !duration_months) {
-      console.log('❌ Missing required fields');
+    // Basic validation with detailed logging
+    if (!branch_id) {
+      console.log('❌ Missing branch_id');
       return res.status(400).json({
         status: 'error',
-        error: 'Missing required fields: branch_id, name, type, price, duration_months'
+        error: 'Missing branch_id'
       });
     }
 
-    // Validate type
-    const validTypes = ['individual', 'couple'];
-    if (!validTypes.includes(type)) {
-      console.log('❌ Invalid package type');
+    if (!name) {
+      console.log('❌ Missing name');
       return res.status(400).json({
         status: 'error',
-        error: 'Invalid package type. Must be individual or couple'
+        error: 'Missing package name'
+      });
+    }
+
+    if (!type) {
+      console.log('❌ Missing type');
+      return res.status(400).json({
+        status: 'error',
+        error: 'Missing package type'
+      });
+    }
+
+    if (price === undefined || price === null) {
+      console.log('❌ Missing price');
+      return res.status(400).json({
+        status: 'error',
+        error: 'Missing price'
+      });
+    }
+
+    if (!duration_months) {
+      console.log('❌ Missing duration_months');
+      return res.status(400).json({
+        status: 'error',
+        error: 'Missing duration_months'
+      });
+    }
+
+    // Handle max_members with default fallback
+    let maxMembersValue = 1; // Default value
+    if (max_members !== undefined && max_members !== null && max_members !== '') {
+      maxMembersValue = parseInt(max_members);
+      if (isNaN(maxMembersValue) || maxMembersValue < 1 || maxMembersValue > 10) {
+        console.log('❌ Invalid max_members value:', max_members);
+        return res.status(400).json({
+          status: 'error',
+          error: 'Max members must be between 1 and 10'
+        });
+      }
+    }
+
+    // Set default max_members based on type if not provided
+    if (!max_members || max_members === '') {
+      switch (type) {
+        case 'individual': maxMembersValue = 1; break;
+        case 'couple': maxMembersValue = 2; break;
+        case 'family': maxMembersValue = 4; break;
+        default: maxMembersValue = 1; break;
+      }
+    }
+
+    console.log('🔧 Processing with max_members:', maxMembersValue);
+
+    // Validate type
+    const validTypes = ['individual', 'couple', 'family'];
+    if (!validTypes.includes(type)) {
+      console.log('❌ Invalid package type:', type);
+      return res.status(400).json({
+        status: 'error',
+        error: 'Invalid package type. Must be individual, couple, or family'
+      });
+    }
+
+    // Convert and validate price
+    const priceNum = parseFloat(price);
+    if (isNaN(priceNum) || priceNum < 0) {
+      console.log('❌ Invalid price value:', price);
+      return res.status(400).json({
+        status: 'error',
+        error: 'Price must be 0 or greater'
+      });
+    }
+
+    // Convert and validate duration
+    const durationNum = parseInt(duration_months);
+    if (isNaN(durationNum) || durationNum < 1) {
+      console.log('❌ Invalid duration value:', duration_months);
+      return res.status(400).json({
+        status: 'error',
+        error: 'Duration must be at least 1 month'
       });
     }
 
     // Check if branch exists
+    console.log('🔍 Checking if branch exists:', branch_id);
     const { data: branch, error: branchError } = await supabase
       .from('branches')
       .select('id')
@@ -205,37 +283,43 @@ router.post('/', authenticate, async (req, res) => {
       .single();
 
     if (branchError || !branch) {
-      console.log('❌ Branch not found');
+      console.log('❌ Branch not found or error:', branchError);
       return res.status(404).json({
         status: 'error',
         error: 'Branch not found'
       });
     }
 
+    // Prepare package data
+    const packageData = {
+      branch_id,
+      name: name.trim(),
+      type,
+      price: priceNum,
+      duration_months: durationNum,
+      max_members: maxMembersValue,
+      features: Array.isArray(features) ? features : ['Gym Access', 'Locker Room'],
+      is_active: Boolean(is_active),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    console.log('💾 Inserting package with data:', packageData);
+
     // Create package
-    console.log('💾 Inserting package into database...');
     const { data, error } = await supabase
       .from('packages')
-      .insert({
-        branch_id,
-        name,
-        type,
-        price: parseFloat(price),
-        duration_months: parseInt(duration_months),
-        features: features || [],
-        is_active,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      })
+      .insert(packageData)
       .select()
       .single();
 
     if (error) {
-      console.error('❌ Database error:', error);
+      console.error('❌ Database error details:', error);
       return res.status(500).json({
         status: 'error',
         error: 'Failed to create package',
-        message: error.message
+        message: error.message,
+        details: error.details || 'No additional details'
       });
     }
 
@@ -248,11 +332,12 @@ router.post('/', authenticate, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error creating package:', error);
+    console.error('❌ Unexpected error creating package:', error);
     res.status(500).json({
       status: 'error',
       error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Unknown error'
+      message: error instanceof Error ? error.message : 'Unknown error',
+      stack: process.env.NODE_ENV === 'development' ? (error instanceof Error ? error.stack : '') : undefined
     });
   }
 });
@@ -269,6 +354,42 @@ router.put('/:id', authenticate, async (req, res) => {
     Object.keys(updateData).forEach(key => 
       updateData[key] === undefined && delete updateData[key]
     );
+
+    // Validate max_members if provided
+    if (updateData.max_members !== undefined) {
+      const maxMembersNum = parseInt(updateData.max_members);
+      if (isNaN(maxMembersNum) || maxMembersNum < 1 || maxMembersNum > 10) {
+        return res.status(400).json({
+          status: 'error',
+          error: 'Max members must be between 1 and 10'
+        });
+      }
+      updateData.max_members = maxMembersNum;
+    }
+
+    // Validate price if provided
+    if (updateData.price !== undefined) {
+      const priceNum = parseFloat(updateData.price);
+      if (isNaN(priceNum) || priceNum < 0) {
+        return res.status(400).json({
+          status: 'error',
+          error: 'Price must be 0 or greater'
+        });
+      }
+      updateData.price = priceNum;
+    }
+
+    // Validate duration if provided
+    if (updateData.duration_months !== undefined) {
+      const durationNum = parseInt(updateData.duration_months);
+      if (isNaN(durationNum) || durationNum < 1) {
+        return res.status(400).json({
+          status: 'error',
+          error: 'Duration must be at least 1 month'
+        });
+      }
+      updateData.duration_months = durationNum;
+    }
 
     // Get existing package
     const { data: existingPackage, error: fetchError } = await supabase
@@ -293,6 +414,7 @@ router.put('/:id', authenticate, async (req, res) => {
       .single();
 
     if (error) {
+      console.error('❌ Update error:', error);
       return res.status(500).json({
         status: 'error',
         error: 'Failed to update package',
@@ -346,6 +468,7 @@ router.delete('/:id', authenticate, async (req, res) => {
       .eq('id', id);
 
     if (error) {
+      console.error('❌ Delete error:', error);
       return res.status(500).json({
         status: 'error',
         error: 'Failed to delete package',

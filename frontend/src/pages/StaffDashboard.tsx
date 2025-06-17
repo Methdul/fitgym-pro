@@ -72,9 +72,10 @@ const StaffDashboard = () => {
   const [selectedPackage, setSelectedPackage] = useState<Package | null>(null);
   const [packageForm, setPackageForm] = useState({
     name: '',
-    type: 'individual',
+    type: 'individual' as 'individual' | 'couple' | 'family',
     price: '',
     duration_months: '',
+    max_members: '1',
     features: [] as string[]
   });
 
@@ -398,6 +399,7 @@ const StaffDashboard = () => {
       type: 'individual',
       price: '',
       duration_months: '',
+      max_members: '1',
       features: []
     });
   };
@@ -427,6 +429,14 @@ const StaffDashboard = () => {
       });
       return false;
     }
+    if (!packageForm.max_members || parseInt(packageForm.max_members) < 1 || parseInt(packageForm.max_members) > 10) {
+      toast({
+        title: "Validation Error",
+        description: "Max members must be between 1 and 10",
+        variant: "destructive",
+      });
+      return false;
+    }
     return true;
   };
 
@@ -445,6 +455,7 @@ const StaffDashboard = () => {
           type: packageForm.type,
           price: parseFloat(packageForm.price),
           duration_months: parseInt(packageForm.duration_months),
+          max_members: parseInt(packageForm.max_members),
           features: packageForm.features.length > 0 ? packageForm.features : ['Gym Access', 'Locker Room']
         }),
       });
@@ -484,6 +495,7 @@ const StaffDashboard = () => {
       type: pkg.type,
       price: pkg.price.toString(),
       duration_months: pkg.duration_months.toString(),
+      max_members: pkg.max_members.toString(),
       features: pkg.features
     });
     setIsEditPackageOpen(true);
@@ -503,6 +515,7 @@ const StaffDashboard = () => {
           type: packageForm.type,
           price: parseFloat(packageForm.price),
           duration_months: parseInt(packageForm.duration_months),
+          max_members: parseInt(packageForm.max_members),
           features: packageForm.features
         }),
       });
@@ -1041,16 +1054,48 @@ const StaffDashboard = () => {
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <Label htmlFor="packageType">Type *</Label>
-                        <Select value={packageForm.type} onValueChange={(value) => setPackageForm(prev => ({ ...prev, type: value }))}>
+                        <Select 
+                          value={packageForm.type} 
+                          onValueChange={(value: 'individual' | 'couple' | 'family') => {
+                            // Auto-set max_members based on type
+                            const defaultMaxMembers = value === 'individual' ? '1' : 
+                                                     value === 'couple' ? '2' : '4';
+                            setPackageForm(prev => ({ 
+                              ...prev, 
+                              type: value,
+                              max_members: defaultMaxMembers
+                            }));
+                          }}
+                        >
                           <SelectTrigger>
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="individual">Individual</SelectItem>
                             <SelectItem value="couple">Couple</SelectItem>
+                            <SelectItem value="family">Family</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
+                      <div>
+                        <Label htmlFor="packageMaxMembers">Max Members *</Label>
+                        <Input
+                          id="packageMaxMembers"
+                          type="number"
+                          min="1"
+                          max="10"
+                          value={packageForm.max_members}
+                          onChange={(e) => setPackageForm(prev => ({ ...prev, max_members: e.target.value }))}
+                          placeholder="1"
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {packageForm.type === 'individual' && 'Usually 1 person'}
+                          {packageForm.type === 'couple' && 'Usually 2 people'}
+                          {packageForm.type === 'family' && 'Usually 3-6 people'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
                       <div>
                         <Label htmlFor="packagePrice">Price ($) *</Label>
                         <Input
@@ -1063,17 +1108,17 @@ const StaffDashboard = () => {
                           placeholder="49.99"
                         />
                       </div>
-                    </div>
-                    <div>
-                      <Label htmlFor="packageDuration">Duration (months) *</Label>
-                      <Input
-                        id="packageDuration"
-                        type="number"
-                        min="1"
-                        value={packageForm.duration_months}
-                        onChange={(e) => setPackageForm(prev => ({ ...prev, duration_months: e.target.value }))}
-                        placeholder="1"
-                      />
+                      <div>
+                        <Label htmlFor="packageDuration">Duration (months) *</Label>
+                        <Input
+                          id="packageDuration"
+                          type="number"
+                          min="1"
+                          value={packageForm.duration_months}
+                          onChange={(e) => setPackageForm(prev => ({ ...prev, duration_months: e.target.value }))}
+                          placeholder="1"
+                        />
+                      </div>
                     </div>
                     <div>
                       <Label htmlFor="packageFeatures">Features (comma-separated)</Label>
@@ -1088,6 +1133,18 @@ const StaffDashboard = () => {
                         rows={3}
                       />
                     </div>
+                    {/* Package Summary */}
+                    {packageForm.name && packageForm.max_members && (
+                      <div className="bg-muted/50 p-3 rounded-lg">
+                        <h4 className="font-medium mb-2">Package Summary</h4>
+                        <p className="text-sm text-muted-foreground">
+                          <strong>{packageForm.name}</strong> - {packageForm.type} package for up to{' '}
+                          <strong className="text-primary">{packageForm.max_members} people</strong>
+                          {packageForm.price && ` at ${packageForm.price}`}
+                          {packageForm.duration_months && ` for ${packageForm.duration_months} month${parseInt(packageForm.duration_months) > 1 ? 's' : ''}`}
+                        </p>
+                      </div>
+                    )}
                     <div className="flex justify-end gap-2">
                       <Button variant="outline" onClick={() => {
                         setIsAddPackageOpen(false);
@@ -1129,6 +1186,10 @@ const StaffDashboard = () => {
                     <div className="flex justify-between text-sm">
                       <span>Type:</span>
                       <span className="font-semibold capitalize">{pkg.type}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span>Max Members:</span>
+                      <span className="font-semibold text-primary">{pkg.max_members} people</span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span>Duration:</span>
@@ -1212,16 +1273,36 @@ const StaffDashboard = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="editPackageType">Type *</Label>
-                  <Select value={packageForm.type} onValueChange={(value) => setPackageForm(prev => ({ ...prev, type: value }))}>
+                  <Select 
+                    value={packageForm.type} 
+                    onValueChange={(value: 'individual' | 'couple' | 'family') => {
+                      setPackageForm(prev => ({ ...prev, type: value }));
+                    }}
+                  >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="individual">Individual</SelectItem>
                       <SelectItem value="couple">Couple</SelectItem>
+                      <SelectItem value="family">Family</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+                <div>
+                  <Label htmlFor="editPackageMaxMembers">Max Members *</Label>
+                  <Input
+                    id="editPackageMaxMembers"
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={packageForm.max_members}
+                    onChange={(e) => setPackageForm(prev => ({ ...prev, max_members: e.target.value }))}
+                    placeholder="1"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="editPackagePrice">Price ($) *</Label>
                   <Input
@@ -1234,17 +1315,17 @@ const StaffDashboard = () => {
                     placeholder="49.99"
                   />
                 </div>
-              </div>
-              <div>
-                <Label htmlFor="editPackageDuration">Duration (months) *</Label>
-                <Input
-                  id="editPackageDuration"
-                  type="number"
-                  min="1"
-                  value={packageForm.duration_months}
-                  onChange={(e) => setPackageForm(prev => ({ ...prev, duration_months: e.target.value }))}
-                  placeholder="1"
-                />
+                <div>
+                  <Label htmlFor="editPackageDuration">Duration (months) *</Label>
+                  <Input
+                    id="editPackageDuration"
+                    type="number"
+                    min="1"
+                    value={packageForm.duration_months}
+                    onChange={(e) => setPackageForm(prev => ({ ...prev, duration_months: e.target.value }))}
+                    placeholder="1"
+                  />
+                </div>
               </div>
               <div>
                 <Label htmlFor="editPackageFeatures">Features (comma-separated)</Label>
