@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Dumbbell, Eye, EyeOff, Loader2, Building2, User } from 'lucide-react';
+import { Dumbbell, Eye, EyeOff, Loader2, Building2, User, ArrowLeft } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
 
@@ -20,13 +20,7 @@ const Login = () => {
   const { signIn } = useAuth();
   const navigate = useNavigate();
 
-  const demoAccounts = [
-    { role: 'Admin', email: 'admin@fitgym.com', password: 'admin123', type: 'user' },
-    { role: 'Member', email: 'member@fitgym.com', password: 'member123', type: 'user' },
-    { role: 'Branch Staff', email: 'staff@downtown.fitgym.com', password: 'branch123', type: 'branch' },
-  ];
-
-  // FIXED: Helper function to create persistent branch session
+  // Helper function to create persistent branch session
   const createBranchSession = (branchInfo: any, sessionToken: string, email: string) => {
     const sessionData = {
       sessionToken: sessionToken,
@@ -35,8 +29,8 @@ const Login = () => {
       branchEmail: email,
       loginTime: new Date().toISOString(),
       userType: 'branch_staff',
-      isAuthenticated: true, // ADDED: Explicit authentication flag
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // ADDED: 24 hour expiration
+      isAuthenticated: true,
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
     };
 
     console.log('💾 Creating persistent branch session:', sessionData);
@@ -44,11 +38,11 @@ const Login = () => {
     // Store session in localStorage
     localStorage.setItem('branch_session', JSON.stringify(sessionData));
     
-    // FIXED: Dispatch multiple events to ensure navbar updates
+    // Dispatch events to notify navbar
     window.dispatchEvent(new Event('storage'));
     window.dispatchEvent(new CustomEvent('branchSessionUpdated', { detail: sessionData }));
     
-    // FIXED: Also store a backup flag for quick detection
+    // Store backup flag for quick detection
     sessionStorage.setItem('branch_logged_in', 'true');
     
     return sessionData;
@@ -57,15 +51,7 @@ const Login = () => {
   // Helper function to wait for auth state to update
   const waitForAuthUpdate = (maxWait = 2000) => {
     return new Promise<void>((resolve) => {
-      const startTime = Date.now();
-      const checkAuth = () => {
-        if (Date.now() - startTime > maxWait) {
-          resolve(); // Timeout, proceed anyway
-          return;
-        }
-        setTimeout(() => resolve(), 300); // Give auth context time to update
-      };
-      checkAuth();
+      setTimeout(() => resolve(), 300); // Give auth context time to update
     });
   };
 
@@ -74,6 +60,12 @@ const Login = () => {
     setLoading(true);
     setError('');
     setLoginType(null);
+
+    if (!email || !password) {
+      setError('Please enter both email and password');
+      setLoading(false);
+      return;
+    }
 
     try {
       console.log('🔐 Starting login process for:', email);
@@ -150,44 +142,42 @@ const Login = () => {
 
       if (branchError) {
         console.error('❌ Branch login error:', branchError);
-        setError('Invalid email or password');
+        setError('Invalid email or password. Please check your credentials and try again.');
         return;
       }
 
       const result = branchData?.[0];
       if (!result || !result.success) {
         console.error('❌ Branch login failed:', result?.error_message || 'Unknown error');
-        setError(result?.error_message || 'Invalid branch credentials');
+        setError('Invalid email or password. Please check your credentials and try again.');
         return;
       }
 
       console.log('✅ Branch login successful:', result.branch_data);
       setLoginType('branch');
 
-      // FIXED: Create persistent branch session
+      // Create persistent branch session
       const branchInfo = result.branch_data;
       const sessionData = createBranchSession(branchInfo, result.session_token, email);
       
-      // FIXED: Small delay to ensure session is properly stored and detected
-      console.log('⏳ Ensuring session persistence...');
+      // Small delay to ensure session persistence
       await new Promise(resolve => setTimeout(resolve, 500));
       
       console.log('🚀 Redirecting to branch dashboard for branch:', branchInfo.id);
-
-      // Redirect to staff dashboard with branch ID
       navigate(`/dashboard/staff/${branchInfo.id}`, {
         replace: true,
         state: { 
           authenticated: true, 
           branchData: branchInfo,
           sessionToken: result.session_token,
-          sessionData: sessionData // ADDED: Pass session data in state
+          sessionData: sessionData
         }
       });
+      return;
 
     } catch (err) {
       console.error('❌ Login error:', err);
-      setError('An unexpected error occurred during login');
+      setError('An unexpected error occurred. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -205,72 +195,65 @@ const Login = () => {
     }
   };
 
-  const fillDemo = (demoEmail: string, demoPassword: string) => {
-    setEmail(demoEmail);
-    setPassword(demoPassword);
-    setError(''); // Clear any existing errors
-  };
-
-  const handleQuickLogin = async (demoEmail: string, demoPassword: string) => {
-    setEmail(demoEmail);
-    setPassword(demoPassword);
-    setError('');
-    
-    // Small delay to show the values were filled
-    setTimeout(() => {
-      const event = new Event('submit', { bubbles: true, cancelable: true });
-      document.getElementById('login-form')?.dispatchEvent(event);
-    }, 100);
-  };
-
   return (
-    <div className="min-h-screen flex items-center justify-center py-12 px-4 gym-gradient">
-      <div className="w-full max-w-md">
-        <Card className="gym-card-gradient border-border">
-          <CardHeader className="text-center">
-            <div className="flex items-center justify-center space-x-2 mb-4">
-              <Dumbbell className="h-8 w-8 text-primary" />
-              <span className="text-2xl font-bold">FitGym Pro</span>
+    <div className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+      <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-secondary/5"></div>
+      
+      <div className="relative w-full max-w-md">
+        <Card className="backdrop-blur-sm bg-card/80 border-border shadow-2xl">
+          <CardHeader className="text-center space-y-4">
+            <div className="flex items-center justify-center space-x-3">
+              <div className="p-2 rounded-full bg-primary/10">
+                <Dumbbell className="h-8 w-8 text-primary" />
+              </div>
+              <span className="text-3xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
+                FitGym Pro
+              </span>
             </div>
-            <CardTitle className="text-2xl">Welcome Back</CardTitle>
-            <p className="text-muted-foreground">
-              Sign in to your account or branch dashboard
-            </p>
+            
+            <div className="space-y-2">
+              <CardTitle className="text-2xl font-semibold">Welcome Back</CardTitle>
+              <p className="text-muted-foreground text-sm">
+                Sign in to access your dashboard
+              </p>
+            </div>
             
             {/* Login Type Indicator */}
             {loginType && (
-              <div className="flex items-center justify-center gap-2 mt-2">
+              <div className="flex items-center justify-center gap-2 p-2 rounded-lg bg-muted/50">
                 {loginType === 'user' ? (
                   <>
                     <User className="h-4 w-4 text-blue-500" />
-                    <span className="text-sm text-blue-500">User Account Login</span>
+                    <span className="text-sm text-blue-500 font-medium">User Account</span>
                   </>
                 ) : (
                   <>
                     <Building2 className="h-4 w-4 text-green-500" />
-                    <span className="text-sm text-green-500">Branch Staff Login</span>
+                    <span className="text-sm text-green-500 font-medium">Branch Staff</span>
                   </>
                 )}
               </div>
             )}
           </CardHeader>
+
           <CardContent className="space-y-6">
-            <form id="login-form" onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-5">
               <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email" className="text-sm font-medium">Email Address</Label>
                 <Input
                   id="email"
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  className="bg-background border-border"
-                  placeholder="Enter your email or branch email"
+                  className="h-11 bg-background/50 border-border focus:ring-2 focus:ring-primary/20"
+                  placeholder="Enter your email address"
+                  autoComplete="email"
                 />
               </div>
               
               <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password" className="text-sm font-medium">Password</Label>
                 <div className="relative">
                   <Input
                     id="password"
@@ -278,15 +261,17 @@ const Login = () => {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
-                    className="bg-background border-border pr-10"
+                    className="h-11 bg-background/50 border-border focus:ring-2 focus:ring-primary/20 pr-11"
                     placeholder="Enter your password"
+                    autoComplete="current-password"
                   />
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                    className="absolute right-0 top-0 h-11 px-3 hover:bg-transparent"
                     onClick={() => setShowPassword(!showPassword)}
+                    tabIndex={-1}
                   >
                     {showPassword ? (
                       <EyeOff className="h-4 w-4 text-muted-foreground" />
@@ -298,70 +283,62 @@ const Login = () => {
               </div>
 
               {error && (
-                <Alert variant="destructive">
-                  <AlertDescription>{error}</AlertDescription>
+                <Alert variant="destructive" className="border-destructive/20 bg-destructive/5">
+                  <AlertDescription className="text-sm">{error}</AlertDescription>
                 </Alert>
               )}
 
-              <Button type="submit" className="w-full" disabled={loading}>
+              <Button 
+                type="submit" 
+                className="w-full h-11 font-medium" 
+                disabled={loading}
+              >
                 {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 {loading ? 'Signing In...' : 'Sign In'}
               </Button>
             </form>
 
-            <div className="space-y-3">
-              <div className="text-center text-sm text-muted-foreground">
-                Demo Accounts:
+            <div className="space-y-4">
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-border" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-card px-2 text-muted-foreground">Access Types</span>
+                </div>
               </div>
-              <div className="grid gap-2">
-                {demoAccounts.map((account, index) => (
-                  <div key={index} className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => fillDemo(account.email, account.password)}
-                      className="flex-1 justify-start text-xs"
-                    >
-                      <div className="flex items-center gap-2">
-                        {account.type === 'user' ? (
-                          <User className="h-3 w-3" />
-                        ) : (
-                          <Building2 className="h-3 w-3" />
-                        )}
-                        <span className="font-semibold mr-2">{account.role}:</span>
-                        <span className="truncate">{account.email}</span>
-                      </div>
-                    </Button>
-                    <Button
-                      variant="default"
-                      size="sm"
-                      onClick={() => handleQuickLogin(account.email, account.password)}
-                      className="px-3"
-                      disabled={loading}
-                    >
-                      Login
-                    </Button>
+
+              <div className="grid grid-cols-2 gap-3 text-xs text-muted-foreground">
+                <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/30">
+                  <User className="h-4 w-4 text-blue-500" />
+                  <div>
+                    <div className="font-medium text-foreground">User Account</div>
+                    <div>Admin & Members</div>
                   </div>
-                ))}
-              </div>
-              
-              <div className="text-center text-xs text-muted-foreground border-t pt-3">
-                <p>💡 <strong>User accounts:</strong> Access admin or member dashboards</p>
-                <p>🏢 <strong>Branch credentials:</strong> Access branch staff dashboard with persistent session</p>
+                </div>
+                <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/30">
+                  <Building2 className="h-4 w-4 text-green-500" />
+                  <div>
+                    <div className="font-medium text-foreground">Branch Staff</div>
+                    <div>Staff Dashboard</div>
+                  </div>
+                </div>
               </div>
             </div>
 
-            {/* Debug Info (remove in production) */}
-            {process.env.NODE_ENV === 'development' && (
-              <div className="text-xs text-muted-foreground text-center space-y-1">
-                <p>Debug: Branch sessions now persist across navigation</p>
-                <p>System will try user login first, then branch login if that fails</p>
+            <div className="text-center space-y-4">
+              <div className="text-sm text-muted-foreground">
+                Don't have an account?{' '}
+                <Link to="/signup" className="text-primary hover:underline font-medium">
+                  Contact Admin
+                </Link>
               </div>
-            )}
-
-            <div className="text-center">
-              <Button variant="link" asChild>
-                <Link to="/">← Back to Website</Link>
+              
+              <Button variant="ghost" asChild className="group">
+                <Link to="/" className="flex items-center gap-2">
+                  <ArrowLeft className="h-4 w-4 group-hover:-translate-x-1 transition-transform" />
+                  Back to Website
+                </Link>
               </Button>
             </div>
           </CardContent>

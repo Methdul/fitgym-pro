@@ -29,7 +29,8 @@ import {
   Key,
   Eye,
   EyeOff,
-  Lock
+  Lock,
+  Mail
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { db, supabase } from '@/lib/supabase';
@@ -134,16 +135,52 @@ const AdminDashboard = () => {
     fetchAllData();
   }, []);
 
+  // ADDED: Debug effect to track branch changes
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development' && branches.length > 0) {
+      console.log('🔄 Branches state updated:');
+      branches.forEach((branch, index) => {
+        console.log(`  ${index + 1}. ${branch.name} -> ${branch.branch_email || 'No email'} (ID: ${branch.id.slice(-8)})`);
+      });
+    }
+  }, [branches]);
+
   const fetchAllData = async () => {
     setLoading(true);
     try {
+      console.log('🔄 Fetching all data...');
+      
+      // FIXED: Force fresh data fetch by adding timestamp
+      const timestamp = Date.now();
       const [branchesData, partnershipsData, staffData] = await Promise.all([
-        db.branches.getAll(),
+        supabase.from('branches').select('*').order('id'),
         db.partnerships.getAll(),
         db.gymStaff.getDisplayed()
       ]);
 
-      setBranches(branchesData.data || []);
+      console.log('📊 Raw branches data:', branchesData.data);
+
+      if (branchesData.error) {
+        throw branchesData.error;
+      }
+
+      // FIXED: Use stable multi-level sorting to prevent shuffling
+      const sortedBranches = (branchesData.data || []).sort((a, b) => {
+        // Primary sort: by ID (most stable)
+        if (a.id < b.id) return -1;
+        if (a.id > b.id) return 1;
+        
+        // Secondary sort: by created_at if IDs are somehow equal
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      });
+
+      console.log('📋 Sorted branches with emails:', sortedBranches.map(b => ({
+        id: b.id.slice(-8),
+        name: b.name,
+        branch_email: b.branch_email
+      })));
+
+      setBranches(sortedBranches);
       setPartnerships(partnershipsData.data || []);
       setGymStaff(staffData.data || []);
     } catch (error) {
@@ -291,7 +328,11 @@ const AdminDashboard = () => {
 
       resetBranchForm();
       setIsAddBranchOpen(false);
-      fetchAllData();
+      
+      // FIXED: Force data refresh with delay to ensure consistency
+      setTimeout(() => {
+        fetchAllData();
+      }, 500);
     } catch (error) {
       console.error('Error adding branch:', error);
       toast({
@@ -359,7 +400,11 @@ const AdminDashboard = () => {
       resetBranchForm();
       setSelectedBranch(null);
       setIsEditBranchOpen(false);
-      fetchAllData();
+      
+      // FIXED: Force data refresh with delay to ensure consistency
+      setTimeout(() => {
+        fetchAllData();
+      }, 500);
     } catch (error) {
       console.error('Error updating branch:', error);
       toast({
@@ -390,7 +435,11 @@ const AdminDashboard = () => {
       resetCredentialsForm();
       setSelectedBranch(null);
       setIsAddCredentialsOpen(false);
-      fetchAllData();
+      
+      // FIXED: Force data refresh with delay to ensure consistency
+      setTimeout(() => {
+        fetchAllData();
+      }, 500);
     } catch (error) {
       console.error('Error adding credentials:', error);
       toast({
@@ -426,7 +475,11 @@ const AdminDashboard = () => {
       setSelectedBranch(null);
       setDeleteConfirmText('');
       setIsDeleteBranchOpen(false);
-      fetchAllData();
+      
+      // FIXED: Force data refresh with delay to ensure consistency
+      setTimeout(() => {
+        fetchAllData();
+      }, 500);
     } catch (error) {
       console.error('Error deleting branch:', error);
       toast({
@@ -707,13 +760,20 @@ const AdminDashboard = () => {
           <TabsContent value="branches" className="space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-2xl font-bold">Branch Management</h2>
-              <Dialog open={isAddBranchOpen} onOpenChange={setIsAddBranchOpen}>
-                <DialogTrigger asChild>
-                  <Button>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Branch
+              <div className="flex gap-2">
+                {/* ADDED: Refresh button for debugging */}
+                {process.env.NODE_ENV === 'development' && (
+                  <Button variant="outline" onClick={fetchAllData} disabled={loading}>
+                    🔄 Refresh Data
                   </Button>
-                </DialogTrigger>
+                )}
+                <Dialog open={isAddBranchOpen} onOpenChange={setIsAddBranchOpen}>
+                  <DialogTrigger asChild>
+                    <Button>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Branch
+                    </Button>
+                  </DialogTrigger>
                 <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                   <DialogHeader>
                     <DialogTitle>Add New Branch</DialogTitle>
@@ -857,90 +917,130 @@ const AdminDashboard = () => {
                 </DialogContent>
               </Dialog>
             </div>
+            </div>
 
+            {/* FIXED: Branch Cards with Forced Re-render */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {branches.map((branch) => (
-                <Card key={branch.id}>
-                  <CardHeader>
-                    <CardTitle className="flex items-center justify-between">
-                      <span className="truncate">{branch.name}</span>
-                      <div className="flex gap-1">
-                        {!branch.branch_email && (
+              {branches.map((branch, index) => {
+                // Force unique rendering by including email in key
+                const uniqueKey = `branch-${branch.id}-${branch.branch_email || 'no-email'}-${index}`;
+                
+                // Debug logging directly in render
+                console.log(`🎯 RENDERING: ${branch.name} -> ${branch.branch_email} (Key: ${uniqueKey})`);
+                
+                return (
+                  <Card key={uniqueKey} className="relative">
+                    <CardHeader>
+                      <CardTitle className="flex items-center justify-between">
+                        <span className="truncate">{branch.name}</span>
+                        <div className="flex gap-1">
+                          {!branch.branch_email && (
+                            <Button 
+                              variant="ghost" 
+                              size="sm"
+                              onClick={() => {
+                                setSelectedBranch(branch);
+                                setIsAddCredentialsOpen(true);
+                              }}
+                              title="Add Staff Credentials"
+                            >
+                              <Key className="h-4 w-4 text-orange-500" />
+                            </Button>
+                          )}
                           <Button 
                             variant="ghost" 
                             size="sm"
                             onClick={() => {
                               setSelectedBranch(branch);
-                              setIsAddCredentialsOpen(true);
+                              handleEditBranch();
                             }}
-                            title="Add Staff Credentials"
                           >
-                            <Key className="h-4 w-4 text-orange-500" />
+                            <Edit className="h-4 w-4" />
                           </Button>
-                        )}
-                        <Button 
-                          variant="ghost" 
-                          size="sm"
-                          onClick={() => {
-                            setSelectedBranch(branch);
-                            handleEditBranch();
-                          }}
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          onClick={() => {
-                            setSelectedBranch(branch);
-                            setIsDeleteBranchOpen(true);
-                          }}
-                          className="text-red-500 hover:text-red-700"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            onClick={() => {
+                              setSelectedBranch(branch);
+                              setIsDeleteBranchOpen(true);
+                            }}
+                            className="text-red-500 hover:text-red-700"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </CardTitle>
+                      <CardDescription className="text-xs">{branch.address}</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="flex justify-between text-sm">
+                        <span>Members:</span>
+                        <span className="font-semibold">{branch.member_count}</span>
                       </div>
-                    </CardTitle>
-                    <CardDescription className="text-xs">{branch.address}</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span>Members:</span>
-                      <span className="font-semibold">{branch.member_count}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span>Staff:</span>
-                      <span className="font-semibold">{branch.staff_count}</span>
-                    </div>
-                    <div className="text-sm">
-                      <span className="text-muted-foreground">Hours:</span>
-                      <div className="text-xs">{branch.hours}</div>
-                    </div>
-                    <div className="flex items-center justify-between text-sm">
-                      <span>Staff Login:</span>
-                      <Badge variant={branch.branch_email ? "default" : "secondary"} className="text-xs">
+                      <div className="flex justify-between text-sm">
+                        <span>Staff:</span>
+                        <span className="font-semibold">{branch.staff_count}</span>
+                      </div>
+                      <div className="text-sm">
+                        <span className="text-muted-foreground">Hours:</span>
+                        <div className="text-xs">{branch.hours}</div>
+                      </div>
+                      
+                      {/* FIXED: Force Fresh Email Display with Debug Info */}
+                      <div className="border-t pt-2 space-y-2">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="flex items-center gap-1">
+                            <Lock className="h-3 w-3" />
+                            Staff Login:
+                          </span>
+                          <Badge variant={branch.branch_email ? "default" : "secondary"} className="text-xs">
+                            {branch.branch_email ? (
+                              <><CheckCircle className="h-3 w-3 mr-1" />Enabled</>
+                            ) : (
+                              <><XCircle className="h-3 w-3 mr-1" />Not Set</>
+                            )}
+                          </Badge>
+                        </div>
+                        
+                        {/* FIXED: Display email with branch identification */}
                         {branch.branch_email ? (
-                          <><CheckCircle className="h-3 w-3 mr-1" />Enabled</>
+                          <div className="space-y-1">
+                            {/* Main email display */}
+                            <div className="flex items-center gap-1 text-xs bg-green-50 dark:bg-green-900/20 p-2 rounded border-l-2 border-green-500">
+                              <Mail className="h-3 w-3 text-green-600 flex-shrink-0" />
+                              <span className="text-green-700 dark:text-green-300 font-mono text-[11px] break-all">
+                                {branch.branch_email}
+                              </span>
+                            </div>
+                            
+                            {/* Debug verification */}
+                            <div className="text-[8px] text-gray-500 font-mono bg-gray-100 dark:bg-gray-800 p-1 rounded">
+                              Branch: {branch.name} | ID: {branch.id.slice(-8)}
+                            </div>
+                          </div>
                         ) : (
-                          <><XCircle className="h-3 w-3 mr-1" />Not Set</>
+                          <div className="text-xs text-muted-foreground bg-orange-50 dark:bg-orange-900/20 p-2 rounded border-l-2 border-orange-500">
+                            No staff login configured
+                          </div>
                         )}
-                      </Badge>
-                    </div>
-                    <div className="flex flex-wrap gap-1 mt-2">
-                      {branch.facilities.slice(0, 2).map((facility, index) => (
-                        <Badge key={index} variant="secondary" className="text-xs">
-                          {facility}
-                        </Badge>
-                      ))}
-                      {branch.facilities.length > 2 && (
-                        <Badge variant="secondary" className="text-xs">
-                          +{branch.facilities.length - 2} more
-                        </Badge>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+                      </div>
+                      
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {branch.facilities.slice(0, 2).map((facility, facilityIndex) => (
+                          <Badge key={`${branch.id}-facility-${facilityIndex}-${facility}`} variant="secondary" className="text-xs">
+                            {facility}
+                          </Badge>
+                        ))}
+                        {branch.facilities.length > 2 && (
+                          <Badge variant="secondary" className="text-xs">
+                            +{branch.facilities.length - 2} more
+                          </Badge>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
           </TabsContent>
 
@@ -1159,7 +1259,7 @@ const AdminDashboard = () => {
                     </div>
                     <div className="flex flex-wrap gap-1 mt-2">
                       {staff.certifications.map((cert, index) => (
-                        <Badge key={index} variant="outline" className="text-xs">
+                        <Badge key={`${staff.id}-cert-${index}`} variant="outline" className="text-xs">
                           {cert}
                         </Badge>
                       ))}

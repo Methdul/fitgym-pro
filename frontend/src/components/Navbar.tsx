@@ -169,7 +169,7 @@ const Navbar = () => {
     return {
       email: '',
       subtitle: null,
-      type: null as const
+      type: null
     };
   };
 
