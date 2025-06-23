@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Crown, Shield, User, Plus, Trash2, AlertTriangle, CheckCircle, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { db, getAuthHeaders } from '@/lib/supabase';
 import type { BranchStaff } from '@/types';
 
 interface StaffManagementProps {
@@ -21,7 +22,7 @@ interface StaffManagementProps {
 // Define the API base URL with better debugging
 const getAPIBaseURL = () => {
   const envURL = import.meta.env.VITE_API_URL;
-  const fallbackURL = 'http://localhost:5000/api';
+  const fallbackURL = 'http://localhost:5001/api';
   
   console.log('🔍 Environment VITE_API_URL:', envURL);
   console.log('🔍 Using API URL:', envURL || fallbackURL);
@@ -118,30 +119,18 @@ export const StaffManagement = ({ staff, branchId, onStaffUpdate }: StaffManagem
 
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/staff`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          branch_id: branchId,
-          first_name: newStaff.firstName,
-          last_name: newStaff.lastName,
-          email: newStaff.email,
-          phone: newStaff.phone || null,
-          role: newStaff.role,
-          pin: newStaff.pin
-        }),
+      const { data, error } = await db.staff.create({
+        branch_id: branchId,
+        first_name: newStaff.firstName,
+        last_name: newStaff.lastName,
+        email: newStaff.email,
+        phone: newStaff.phone || null,
+        role: newStaff.role,
+        pin: newStaff.pin
       });
 
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || `HTTP error! status: ${response.status}`);
-      }
-
-      if (result.status !== 'success') {
-        throw new Error(result.error || 'Failed to add staff member');
+      if (error) {
+        throw error;
       }
 
       toast({
@@ -206,40 +195,28 @@ export const StaffManagement = ({ staff, branchId, onStaffUpdate }: StaffManagem
 
     setLoading(true);
     try {
-      // First verify the PIN
-      const pinResponse = await fetch(`${API_BASE_URL}/staff/verify-pin`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          staffId: removeForm.authorizingStaffId,
-          pin: removeForm.pin
-        }),
-      });
+      console.log('🔐 Attempting to remove staff:', selectedStaff?.first_name, selectedStaff?.last_name);
+      console.log('📍 Using PIN:', removeForm.pin);
+      
+      // First verify the PIN - this will also get us a session token
+      const { isValid, staff, error: pinError } = await db.staff.verifyPin(
+        removeForm.authorizingStaffId, 
+        removeForm.pin
+      );
+      
+      console.log('🔐 PIN verification result:', { isValid, staff, error: pinError });
 
-      const pinResult = await pinResponse.json();
-
-      if (!pinResponse.ok || !pinResult.isValid) {
-        throw new Error('Invalid PIN. Please check your credentials.');
+      if (!isValid) {
+        throw new Error(pinError || 'Invalid PIN. Please check your credentials.');
       }
 
-      // If PIN is valid, proceed with deletion
-      const deleteResponse = await fetch(`${API_BASE_URL}/staff/${selectedStaff!.id}`, {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      console.log('✅ PIN verified successfully, proceeding with deletion...');
 
-      const deleteResult = await deleteResponse.json();
+      // Now delete the staff member - the session token is automatically included
+      const { error: deleteError } = await db.staff.delete(selectedStaff!.id);
 
-      if (!deleteResponse.ok) {
-        throw new Error(deleteResult.error || `HTTP error! status: ${deleteResponse.status}`);
-      }
-
-      if (deleteResult.status !== 'success') {
-        throw new Error(deleteResult.error || 'Failed to remove staff member');
+      if (deleteError) {
+        throw deleteError;
       }
 
       toast({
@@ -259,7 +236,7 @@ export const StaffManagement = ({ staff, branchId, onStaffUpdate }: StaffManagem
       onStaffUpdate(); // Refresh the staff list
 
     } catch (error) {
-      console.error('Error removing staff:', error);
+      console.error('❌ Error removing staff:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to remove staff member';
       setError(errorMessage);
       

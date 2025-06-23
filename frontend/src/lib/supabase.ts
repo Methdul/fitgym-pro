@@ -16,6 +16,53 @@ if (import.meta.env.PROD && (!import.meta.env.VITE_SUPABASE_URL || !import.meta.
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+// Session token management
+let staffSessionToken: string | null = null;
+
+export const setStaffSessionToken = (token: string | null) => {
+  staffSessionToken = token;
+  if (token) {
+    localStorage.setItem('staff_session_token', token);
+  } else {
+    localStorage.removeItem('staff_session_token');
+  }
+};
+
+export const getStaffSessionToken = () => {
+  if (!staffSessionToken) {
+    staffSessionToken = localStorage.getItem('staff_session_token');
+  }
+  return staffSessionToken;
+};
+
+// Helper to get auth headers
+export const getAuthHeaders = () => {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  // Add session token if available
+  const sessionToken = getStaffSessionToken();
+  if (sessionToken) {
+    headers['X-Session-Token'] = sessionToken;
+  }
+
+  // Add JWT if available
+  const authToken = localStorage.getItem('access_token');
+  if (authToken) {
+    try {
+      const tokenData = JSON.parse(authToken);
+      if (tokenData.access_token) {
+        headers['Authorization'] = `Bearer ${tokenData.access_token}`;
+      }
+    } catch {
+      headers['Authorization'] = `Bearer ${authToken}`;
+    }
+  }
+
+  return headers;
+};
+
 // Enhanced auth helpers
 export const auth = {
   // Sign in with email/password
@@ -52,6 +99,8 @@ export const auth = {
   // Sign out
   signOut: async () => {
     try {
+      // Clear session token
+      setStaffSessionToken(null);
       const { error } = await supabase.auth.signOut();
       return { error };
     } catch (error) {
@@ -87,14 +136,16 @@ export const auth = {
 
 // Enhanced database helpers
 export const db = {
-  // Staff operations - UPDATED TO USE BACKEND API
+  // Staff operations - UPDATED TO USE BACKEND API WITH SESSION
   staff: {
     getByBranch: async (branchId: string) => {
       try {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
         console.log('🔍 Using API URL for staff:', API_BASE_URL);
         
-        const response = await fetch(`${API_BASE_URL}/staff/branch/${branchId}`);
+        const response = await fetch(`${API_BASE_URL}/staff/branch/${branchId}`, {
+          headers: getAuthHeaders(),
+        });
         const result = await response.json();
         
         if (!response.ok) {
@@ -125,6 +176,12 @@ export const db = {
           return { isValid: false, staff: null, error: result.error || 'Verification failed' };
         }
 
+        // Store session token if provided
+        if (result.sessionToken) {
+          setStaffSessionToken(result.sessionToken);
+          console.log('🎫 Stored session token');
+        }
+
         return {
           isValid: result.isValid || false,
           staff: result.staff || null,
@@ -139,7 +196,9 @@ export const db = {
     getAll: async () => {
       try {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
-        const response = await fetch(`${API_BASE_URL}/staff`);
+        const response = await fetch(`${API_BASE_URL}/staff`, {
+          headers: getAuthHeaders(),
+        });
         const result = await response.json();
         
         if (!response.ok) {
@@ -160,9 +219,7 @@ export const db = {
         
         const response = await fetch(`${API_BASE_URL}/staff`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: getAuthHeaders(),
           body: JSON.stringify(staff),
         });
 
@@ -184,9 +241,7 @@ export const db = {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
         const response = await fetch(`${API_BASE_URL}/staff/${id}`, {
           method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: getAuthHeaders(),
           body: JSON.stringify(updates),
         });
 
@@ -208,6 +263,7 @@ export const db = {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
         const response = await fetch(`${API_BASE_URL}/staff/${id}`, {
           method: 'DELETE',
+          headers: getAuthHeaders(),
         });
 
         const result = await response.json();
@@ -226,7 +282,9 @@ export const db = {
     getById: async (id: string) => {
       try {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
-        const response = await fetch(`${API_BASE_URL}/staff/${id}`);
+        const response = await fetch(`${API_BASE_URL}/staff/${id}`, {
+          headers: getAuthHeaders(),
+        });
         const result = await response.json();
         
         if (!response.ok) {
@@ -250,12 +308,14 @@ export const db = {
     delete: (id: string) => supabase.from('branches').delete().eq('id', id),
   },
 
-  // Members - UPDATED TO USE BACKEND API
+  // Members - UPDATED TO USE BACKEND API WITH SESSION
   members: {
     getByBranch: async (branchId: string) => {
       try {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
-        const response = await fetch(`${API_BASE_URL}/members/branch/${branchId}`);
+        const response = await fetch(`${API_BASE_URL}/members/branch/${branchId}`, {
+          headers: getAuthHeaders(),
+        });
         const result = await response.json();
         
         if (!response.ok) {
@@ -272,7 +332,9 @@ export const db = {
     getByUserId: async (userId: string) => {
       try {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
-        const response = await fetch(`${API_BASE_URL}/members`);
+        const response = await fetch(`${API_BASE_URL}/members`, {
+          headers: getAuthHeaders(),
+        });
         const result = await response.json();
         
         if (!response.ok) {
@@ -291,7 +353,9 @@ export const db = {
     getById: async (id: string) => {
       try {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
-        const response = await fetch(`${API_BASE_URL}/members/${id}`);
+        const response = await fetch(`${API_BASE_URL}/members/${id}`, {
+          headers: getAuthHeaders(),
+        });
         const result = await response.json();
         
         if (!response.ok) {
@@ -312,9 +376,7 @@ export const db = {
         
         const response = await fetch(`${API_BASE_URL}/members`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: getAuthHeaders(),
           body: JSON.stringify(member),
         });
 
@@ -336,9 +398,7 @@ export const db = {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
         const response = await fetch(`${API_BASE_URL}/members/${id}`, {
           method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: getAuthHeaders(),
           body: JSON.stringify(updates),
         });
 
@@ -360,6 +420,7 @@ export const db = {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
         const response = await fetch(`${API_BASE_URL}/members/${id}`, {
           method: 'DELETE',
+          headers: getAuthHeaders(),
         });
 
         const result = await response.json();
@@ -378,7 +439,9 @@ export const db = {
     search: async (branchId: string, query: string) => {
       try {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
-        const response = await fetch(`${API_BASE_URL}/members/search/${branchId}?q=${encodeURIComponent(query)}`);
+        const response = await fetch(`${API_BASE_URL}/members/search/${branchId}?q=${encodeURIComponent(query)}`, {
+          headers: getAuthHeaders(),
+        });
         const result = await response.json();
         
         if (!response.ok) {
@@ -395,7 +458,9 @@ export const db = {
     getAll: async () => {
       try {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
-        const response = await fetch(`${API_BASE_URL}/members`);
+        const response = await fetch(`${API_BASE_URL}/members`, {
+          headers: getAuthHeaders(),
+        });
         const result = await response.json();
         
         if (!response.ok) {
@@ -410,12 +475,14 @@ export const db = {
     },
   },
 
-  // Packages - UPDATED TO USE BACKEND API
+  // Packages - UPDATED TO USE BACKEND API WITH SESSION
   packages: {
     getActive: async () => {
       try {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
-        const response = await fetch(`${API_BASE_URL}/packages/active`);
+        const response = await fetch(`${API_BASE_URL}/packages/active`, {
+          headers: getAuthHeaders(),
+        });
         const result = await response.json();
         
         if (!response.ok) {
@@ -432,7 +499,9 @@ export const db = {
     getAll: async () => {
       try {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
-        const response = await fetch(`${API_BASE_URL}/packages`);
+        const response = await fetch(`${API_BASE_URL}/packages`, {
+          headers: getAuthHeaders(),
+        });
         const result = await response.json();
         
         if (!response.ok) {
@@ -449,7 +518,9 @@ export const db = {
     getById: async (id: string) => {
       try {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
-        const response = await fetch(`${API_BASE_URL}/packages/${id}`);
+        const response = await fetch(`${API_BASE_URL}/packages/${id}`, {
+          headers: getAuthHeaders(),
+        });
         const result = await response.json();
         
         if (!response.ok) {
@@ -468,9 +539,7 @@ export const db = {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
         const response = await fetch(`${API_BASE_URL}/packages`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: getAuthHeaders(),
           body: JSON.stringify(pkg),
         });
 
@@ -492,9 +561,7 @@ export const db = {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
         const response = await fetch(`${API_BASE_URL}/packages/${id}`, {
           method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: getAuthHeaders(),
           body: JSON.stringify(updates),
         });
 
@@ -516,6 +583,7 @@ export const db = {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
         const response = await fetch(`${API_BASE_URL}/packages/${id}`, {
           method: 'DELETE',
+          headers: getAuthHeaders(),
         });
 
         const result = await response.json();
@@ -601,7 +669,7 @@ export const db = {
     getAll: () => supabase.from('staff_actions_log').select('*, branch_staff(first_name, last_name), members(first_name, last_name)').order('created_at', { ascending: false }),
   },
 
-  // Analytics - NEW - THIS IS THE MISSING SECTION!
+  // Analytics - UPDATED TO USE SESSION
   analytics: {
     getBranchAnalytics: async (branchId: string, startDate?: string, endDate?: string) => {
       try {
@@ -619,7 +687,9 @@ export const db = {
         
         console.log('🔍 Fetching analytics from:', url);
         
-        const response = await fetch(url);
+        const response = await fetch(url, {
+          headers: getAuthHeaders(),
+        });
         const result = await response.json();
         
         if (!response.ok) {

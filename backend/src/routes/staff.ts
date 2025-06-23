@@ -1,6 +1,8 @@
 import express from 'express';
 import { supabase } from '../lib/supabase';
 import { authenticate, requireAdmin, optionalAuth } from '../middleware/auth';
+import { staffAuth } from '../middleware/staffAuth';
+import { sessionManager } from '../lib/sessionManager';
 
 const router = express.Router();
 
@@ -72,10 +74,17 @@ router.get('/branch/:branchId', optionalAuth, async (req, res) => {
   }
 });
 
-// Verify staff PIN - SECURED WITH RATE LIMITING AND HASH COMPARISON
+// Verify staff PIN - ENHANCED WITH SESSION TOKEN
 router.post('/verify-pin', async (req, res) => {
   try {
     const { staffId, pin } = req.body;
+
+    console.log('🔐 PIN verification request:', { 
+      staffId, 
+      pinLength: pin?.length,
+      hasStaffId: !!staffId,
+      hasPin: !!pin 
+    });
 
     if (!staffId || !pin) {
       return res.status(400).json({
@@ -98,111 +107,110 @@ router.post('/verify-pin', async (req, res) => {
       }
     }
 
-    // Try Edge Function for PIN verification first (if available)
-    try {
-      const response = await fetch(`${process.env.SUPABASE_URL}/functions/v1/staff-auth`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_KEY}`
-        },
-        body: JSON.stringify({ staffId, pin, action: 'verify' })
-      });
+    // Get staff member
+    const { data: staff, error } = await supabase
+      .from('branch_staff')
+      .select('*')
+      .eq('id', staffId)
+      .single();
 
-      const result = await response.json() as any;
-
-      // Handle rate limiting in response
+    if (error || !staff) {
+      console.log('❌ Staff not found:', { staffId, error });
       if (hasSecurityFeatures()) {
-        if (!result.isValid) {
-          pinAttemptTracker.recordFailedAttempt(staffId);
-        } else {
-          pinAttemptTracker.resetAttempts(staffId);
-        }
+        pinAttemptTracker.recordFailedAttempt(staffId);
       }
-
-      res.json({
+      return res.json({
         status: 'success',
-        isValid: result.isValid,
-        staff: result.staff,
-        error: result.error
+        isValid: false,
+        staff: null,
+        error: 'Staff not found'
+      });
+    }
+
+    console.log('📋 Staff found:', {
+      id: staff.id,
+      name: `${staff.first_name} ${staff.last_name}`,
+      hasPin: !!staff.pin,
+      hasPinHash: !!staff.pin_hash,
+      pinStoredType: staff.pin === 'HASHED' ? 'HASHED' : staff.pin ? 'PLAIN' : 'NONE'
+    });
+
+    let isValid = false;
+
+    // PIN verification logic
+    if (hasSecurityFeatures() && staff.pin_hash) {
+      console.log('🔐 Using secure PIN verification (bcrypt)');
+      isValid = await verifyPin(pin, staff.pin_hash);
+      console.log('🔐 Bcrypt verification result:', isValid);
+    } else if (staff.pin && staff.pin !== 'HASHED') {
+      console.log('⚠️ Using legacy PIN verification (plain text)');
+      console.log('📍 PIN comparison:', {
+        enteredPin: pin,
+        storedPin: staff.pin,
+        exactMatch: staff.pin === pin,
+        trimmedMatch: staff.pin?.trim() === pin.trim()
       });
       
-    } catch (edgeFunctionError) {
-      // Fallback to direct database check with secure hash comparison
-      console.log('Edge Function failed, using secure direct database check');
-      
-      const { data: staff, error } = await supabase
-        .from('branch_staff')
-        .select('*')
-        .eq('id', staffId)
-        .single();
+      // Try both exact and trimmed comparison
+      isValid = staff.pin === pin || staff.pin?.trim() === pin.trim();
+    } else {
+      console.log('❌ No valid PIN method available');
+      isValid = false;
+    }
 
-      if (error || !staff) {
-        if (hasSecurityFeatures()) {
-          pinAttemptTracker.recordFailedAttempt(staffId);
-        }
-        return res.json({
-          status: 'success',
-          isValid: false,
-          staff: null,
-          error: 'Staff not found'
-        });
-      }
+    console.log('✅ Final PIN verification result:', isValid);
 
-      let isValid = false;
-
-      // NEW: Try secure PIN verification first (if pin_hash exists)
-      if (hasSecurityFeatures() && staff.pin_hash) {
-        console.log('🔐 Using secure PIN verification');
-        isValid = await verifyPin(pin, staff.pin_hash);
-      }
-      // FALLBACK: Use legacy PIN verification (if no pin_hash)
-      else if (staff.pin && staff.pin !== 'HASHED') {
-        console.log('⚠️ Using legacy PIN verification - consider migrating to secure hashing');
-        isValid = staff.pin === pin;
-      }
-      else {
-        console.log('❌ No PIN method available for staff member');
-        isValid = false;
-      }
-
-      // Handle security tracking
-      if (hasSecurityFeatures()) {
-        if (isValid) {
-          pinAttemptTracker.resetAttempts(staffId);
-        } else {
-          pinAttemptTracker.recordFailedAttempt(staffId);
-        }
-      }
-
+    // Handle security tracking
+    if (hasSecurityFeatures()) {
       if (isValid) {
-        // Update last_active
-        await supabase
-          .from('branch_staff')
-          .update({ last_active: new Date().toISOString() })
-          .eq('id', staffId);
-
-        console.log(`✅ Successful PIN verification for staff ${staffId}`);
+        pinAttemptTracker.resetAttempts(staffId);
       } else {
-        console.log(`🔐 Failed PIN attempt for staff ${staffId}`);
+        pinAttemptTracker.recordFailedAttempt(staffId);
       }
+    }
+
+    if (isValid) {
+      // Update last_active
+      await supabase
+        .from('branch_staff')
+        .update({ last_active: new Date().toISOString() })
+        .eq('id', staffId);
+
+      // CREATE SESSION TOKEN
+      const sessionToken = sessionManager.createSession(
+        staff.id,
+        staff.branch_id,
+        staff.role
+      );
+
+      console.log('🎫 Created session token for staff:', staff.id);
 
       res.json({
         status: 'success',
-        isValid,
-        staff: isValid ? {
+        isValid: true,
+        staff: {
           id: staff.id,
           first_name: staff.first_name,
           last_name: staff.last_name,
           role: staff.role,
           email: staff.email,
           branch_id: staff.branch_id
-        } : null,
-        error: isValid ? null : 'Invalid PIN'
+        },
+        sessionToken, // Return the session token
+        error: null
+      });
+    } else {
+      console.log('🔐 Failed PIN attempt for staff:', staffId);
+      res.json({
+        status: 'success',
+        isValid: false,
+        staff: null,
+        error: 'Invalid PIN'
       });
     }
+
   } catch (error) {
-    console.error('PIN verification error:', error);
+    console.error('❌ PIN verification error:', error);
     res.status(500).json({
       status: 'error',
       error: 'Internal server error',
@@ -212,7 +220,7 @@ router.post('/verify-pin', async (req, res) => {
 });
 
 // Create staff member - SECURED WITH PIN HASHING
-router.post('/', async (req, res) => {
+router.post('/', staffAuth, async (req, res) => {
   try {
     console.log('Creating new staff member:', { ...req.body, pin: '[REDACTED]' });
     
@@ -383,8 +391,8 @@ router.get('/', requireAdmin, async (req, res) => {
   }
 });
 
-// Update staff member - BACKWARD COMPATIBLE
-router.put('/:id', authenticate, async (req, res) => {
+// Update staff member - NOW USES staffAuth
+router.put('/:id', staffAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const { first_name, last_name, email, phone, role, pin } = req.body;
@@ -491,10 +499,15 @@ router.put('/:id', authenticate, async (req, res) => {
   }
 });
 
-// Delete staff member
-router.delete('/:id', authenticate, async (req, res) => {
+// Delete staff member - NOW USES staffAuth
+router.delete('/:id', staffAuth, async (req, res) => {
   try {
     const { id } = req.params;
+
+    // Log who is performing the deletion
+    if (req.staffSession) {
+      console.log(`🗑️ Staff ${req.staffSession.staffId} is deleting staff ${id}`);
+    }
 
     // Get staff member to verify existence
     const { data: staff, error: fetchError } = await supabase
@@ -545,7 +558,7 @@ router.delete('/:id', authenticate, async (req, res) => {
       pinAttemptTracker.resetAttempts(id);
     }
 
-    console.log(`🗑️ Staff member deleted: ${staff.first_name} ${staff.last_name}`);
+    console.log(`✅ Staff member deleted: ${staff.first_name} ${staff.last_name}`);
 
     res.json({
       status: 'success',
@@ -562,7 +575,7 @@ router.delete('/:id', authenticate, async (req, res) => {
 });
 
 // Get single staff member (NO PIN DATA EXPOSED)
-router.get('/:id', authenticate, async (req, res) => {
+router.get('/:id', staffAuth, async (req, res) => {
   try {
     const { id } = req.params;
 
