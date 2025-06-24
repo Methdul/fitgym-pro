@@ -36,7 +36,7 @@ import {
   BarChart3,
   RefreshCw
 } from 'lucide-react';
-import { db, getAuthHeaders } from '@/lib/supabase'; // ✅ Added getAuthHeaders import
+import { db, getAuthHeaders, setStaffSessionToken, isAuthenticated } from '@/lib/supabase';
 import { AddNewMemberModal } from '@/components/staff/AddNewMemberModal';
 import { AddExistingMemberModal } from '@/components/staff/AddExistingMemberModal';
 import { ViewMemberModal } from '@/components/staff/ViewMemberModal';
@@ -136,20 +136,8 @@ const StaffDashboard = () => {
         console.log('🏢 Found branch session:', sessionData);
         
         if (sessionData.branchId === branchId && sessionData.userType === 'branch_staff') {
-          console.log('✅ Valid branch session found, auto-authenticating...');
-          
-          setAuthenticatedStaff({
-            id: 'branch_staff',
-            first_name: 'Branch',
-            last_name: 'Staff',
-            role: 'manager',
-            branch_id: branchId,
-            email: sessionData.branchEmail,
-            login_method: 'credentials'
-          });
-          setLoginMethod('credentials');
-          setShowAuthModal(false);
-          console.log('✅ Auto-authenticated via branch credentials');
+          console.log('✅ Valid branch session found, creating backend session...');
+          createBranchSession(sessionData);
           return;
         } else {
           console.log('⚠️ Branch session branch ID mismatch or invalid type');
@@ -162,18 +150,19 @@ const StaffDashboard = () => {
     }
     
     if (locationState?.authenticated && locationState?.branchData) {
-      console.log('🚀 Authenticated via navigation state');
-      setAuthenticatedStaff({
-        id: 'branch_staff',
-        first_name: 'Branch',
-        last_name: 'Staff',
-        role: 'manager',
-        branch_id: branchId,
-        email: locationState.branchData.branch_email,
-        login_method: 'credentials'
-      });
-      setLoginMethod('credentials');
-      setShowAuthModal(false);
+      console.log('🚀 Authenticated via navigation state, creating backend session...');
+      const sessionData = {
+        sessionToken: `branch_${Date.now()}`,
+        branchId: branchId,
+        branchName: locationState.branchData.name || 'Unknown Branch',
+        branchEmail: locationState.branchData.branch_email,
+        loginTime: new Date().toISOString(),
+        userType: 'branch_staff',
+        authMethod: 'credentials'
+      };
+      
+      localStorage.setItem('branch_session', JSON.stringify(sessionData));
+      createBranchSession(sessionData);
       return;
     }
     
@@ -181,6 +170,35 @@ const StaffDashboard = () => {
     setShowAuthModal(true);
     
   }, [branchId, location.state]);
+
+  // Add this new function to create backend session for branch authentication
+  const createBranchSession = async (sessionData: any) => {
+    try {
+      // Create a session token for branch authentication
+      const branchSessionToken = `branch_${sessionData.branchId}_${Date.now()}`;
+      
+      // Store the session token
+      setStaffSessionToken(branchSessionToken);
+      
+      // Set authenticated state
+      setAuthenticatedStaff({
+        id: 'branch_staff',
+        first_name: 'Branch',
+        last_name: 'Staff',
+        role: 'manager',
+        branch_id: branchId,
+        email: sessionData.branchEmail,
+        login_method: 'credentials'
+      });
+      setLoginMethod('credentials');
+      setShowAuthModal(false);
+      
+      console.log('✅ Branch session created with token:', branchSessionToken);
+    } catch (error) {
+      console.error('❌ Error creating branch session:', error);
+      setShowAuthModal(true);
+    }
+  };
 
   // Data fetching effect
   useEffect(() => {
@@ -215,7 +233,7 @@ const StaffDashboard = () => {
   const fetchBranchPackages = async (branchId: string) => {
     try {
       const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/branch/${branchId}`, {
-        headers: getAuthHeaders() // ✅ Added auth headers
+        headers: getAuthHeaders()
       });
       const result = await response.json();
       
@@ -329,10 +347,21 @@ const StaffDashboard = () => {
   const handleDeleteMember = async () => {
     if (!memberToDelete) return;
 
+    // Check authentication before making request
+    if (!isAuthenticated()) {
+      toast({
+        title: "Authentication Required",
+        description: "Please log in again to continue",
+        variant: "destructive",
+      });
+      setShowAuthModal(true);
+      return;
+    }
+
     try {
       const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/members/${memberToDelete.id}`, {
         method: 'DELETE',
-        headers: getAuthHeaders(), // ✅ Added auth headers
+        headers: getAuthHeaders(),
       });
 
       if (!response.ok) {
@@ -477,10 +506,25 @@ const StaffDashboard = () => {
   const handleAddPackage = async () => {
     if (!validatePackageForm() || !branchId) return;
 
+    // Check authentication before making request
+    if (!isAuthenticated()) {
+      toast({
+        title: "Authentication Required",
+        description: "Please log in again to continue",
+        variant: "destructive",
+      });
+      setShowAuthModal(true);
+      return;
+    }
+
     try {
+      console.log('🔧 Adding package with auth headers...');
+      const authHeaders = getAuthHeaders();
+      console.log('📤 Request headers:', Object.keys(authHeaders));
+
       const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages`, {
         method: 'POST',
-        headers: getAuthHeaders(), // ✅ Fixed: Using getAuthHeaders() instead of manual headers
+        headers: authHeaders,
         body: JSON.stringify({
           branch_id: branchId,
           name: packageForm.name,
@@ -495,7 +539,8 @@ const StaffDashboard = () => {
       const result = await response.json();
 
       if (!response.ok || result.status !== 'success') {
-        throw new Error(result.error || 'Failed to create package');
+        console.error('❌ Package creation failed:', response.status, result);
+        throw new Error(result.error || `HTTP ${response.status}: Failed to create package`);
       }
 
       toast({
@@ -536,10 +581,21 @@ const StaffDashboard = () => {
   const handleUpdatePackage = async () => {
     if (!validatePackageForm() || !selectedPackage) return;
 
+    // Check authentication before making request
+    if (!isAuthenticated()) {
+      toast({
+        title: "Authentication Required",
+        description: "Please log in again to continue",
+        variant: "destructive",
+      });
+      setShowAuthModal(true);
+      return;
+    }
+
     try {
       const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/${selectedPackage.id}`, {
         method: 'PUT',
-        headers: getAuthHeaders(), // ✅ Fixed: Using getAuthHeaders()
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           name: packageForm.name,
           type: packageForm.type,
@@ -581,10 +637,21 @@ const StaffDashboard = () => {
   };
 
   const handleTogglePackageStatus = async (id: string, currentStatus: boolean) => {
+    // Check authentication before making request
+    if (!isAuthenticated()) {
+      toast({
+        title: "Authentication Required",
+        description: "Please log in again to continue",
+        variant: "destructive",
+      });
+      setShowAuthModal(true);
+      return;
+    }
+
     try {
       const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/${id}`, {
         method: 'PUT',
-        headers: getAuthHeaders(), // ✅ Fixed: Using getAuthHeaders()
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           is_active: !currentStatus
         }),
@@ -621,10 +688,21 @@ const StaffDashboard = () => {
       return;
     }
 
+    // Check authentication before making request
+    if (!isAuthenticated()) {
+      toast({
+        title: "Authentication Required",
+        description: "Please log in again to continue",
+        variant: "destructive",
+      });
+      setShowAuthModal(true);
+      return;
+    }
+
     try {
       const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/${id}`, {
         method: 'DELETE',
-        headers: getAuthHeaders(), // ✅ Fixed: Using getAuthHeaders()
+        headers: getAuthHeaders(),
       });
 
       const result = await response.json();

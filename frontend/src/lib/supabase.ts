@@ -16,38 +16,105 @@ if (import.meta.env.PROD && (!import.meta.env.VITE_SUPABASE_URL || !import.meta.
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-// Session token management
+// Enhanced session token management
 let staffSessionToken: string | null = null;
 
 export const setStaffSessionToken = (token: string | null) => {
   staffSessionToken = token;
   if (token) {
     localStorage.setItem('staff_session_token', token);
+    // Store expiry time (24 hours from now)
+    const expiry = Date.now() + (24 * 60 * 60 * 1000);
+    localStorage.setItem('staff_session_expiry', expiry.toString());
+    console.log('✅ Session token stored with expiry:', new Date(expiry));
   } else {
     localStorage.removeItem('staff_session_token');
+    localStorage.removeItem('staff_session_expiry');
+    console.log('🗑️ Session token cleared');
   }
 };
 
 export const getStaffSessionToken = () => {
   if (!staffSessionToken) {
-    staffSessionToken = localStorage.getItem('staff_session_token');
+    const storedToken = localStorage.getItem('staff_session_token');
+    const storedExpiry = localStorage.getItem('staff_session_expiry');
+    
+    if (storedToken && storedExpiry) {
+      const expiryTime = parseInt(storedExpiry);
+      if (Date.now() < expiryTime) {
+        staffSessionToken = storedToken;
+        console.log('📱 Retrieved valid session token from storage');
+      } else {
+        console.log('⏰ Session token expired, clearing...');
+        localStorage.removeItem('staff_session_token');
+        localStorage.removeItem('staff_session_expiry');
+        staffSessionToken = null;
+      }
+    }
   }
   return staffSessionToken;
 };
 
-// Helper to get auth headers
+// Check if user is authenticated
+export const isAuthenticated = (): boolean => {
+  const sessionToken = getStaffSessionToken();
+  const branchSession = localStorage.getItem('branch_session');
+  
+  if (sessionToken) {
+    console.log('✅ Authenticated via session token');
+    return true;
+  }
+  
+  if (branchSession) {
+    try {
+      const sessionData = JSON.parse(branchSession);
+      if (sessionData.sessionToken && sessionData.userType === 'branch_staff') {
+        console.log('✅ Authenticated via branch session');
+        return true;
+      }
+    } catch (error) {
+      console.error('❌ Invalid branch session data');
+    }
+  }
+  
+  console.log('❌ No valid authentication found');
+  return false;
+};
+
+// Helper to get auth headers - FIXED VERSION
 export const getAuthHeaders = () => {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
 
-  // Add session token if available
+  // 1. Try to get staff session token first (highest priority)
   const sessionToken = getStaffSessionToken();
   if (sessionToken) {
+    headers['Authorization'] = `Bearer ${sessionToken}`;
     headers['X-Session-Token'] = sessionToken;
+    console.log('🔐 Using staff session token for auth');
+    return headers;
   }
 
-  // Add JWT if available
+  // 2. Try to get branch session from localStorage
+  const branchSession = localStorage.getItem('branch_session');
+  if (branchSession) {
+    try {
+      const sessionData = JSON.parse(branchSession);
+      if (sessionData.sessionToken) {
+        headers['Authorization'] = `Bearer ${sessionData.sessionToken}`;
+        headers['X-Session-Token'] = sessionData.sessionToken;
+        headers['X-Branch-Auth'] = 'true';
+        headers['X-Branch-ID'] = sessionData.branchId;
+        console.log('🏢 Using branch session token for auth');
+        return headers;
+      }
+    } catch (error) {
+      console.error('Error parsing branch session:', error);
+    }
+  }
+
+  // 3. Try to get JWT token (fallback)
   const authToken = localStorage.getItem('access_token');
   if (authToken) {
     try {
@@ -58,8 +125,11 @@ export const getAuthHeaders = () => {
     } catch {
       headers['Authorization'] = `Bearer ${authToken}`;
     }
+    console.log('🎫 Using JWT token for auth');
+    return headers;
   }
 
+  console.warn('⚠️ No authentication token found');
   return headers;
 };
 
