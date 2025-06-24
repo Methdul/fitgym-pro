@@ -36,7 +36,7 @@ import {
   BarChart3,
   RefreshCw
 } from 'lucide-react';
-import { db } from '@/lib/supabase';
+import { db, getAuthHeaders } from '@/lib/supabase'; // ✅ Added getAuthHeaders import
 import { AddNewMemberModal } from '@/components/staff/AddNewMemberModal';
 import { AddExistingMemberModal } from '@/components/staff/AddExistingMemberModal';
 import { ViewMemberModal } from '@/components/staff/ViewMemberModal';
@@ -64,7 +64,7 @@ const StaffDashboard = () => {
   const [showViewMember, setShowViewMember] = useState(false);
   const [showRenewMember, setShowRenewMember] = useState(false);
   
-  // FIXED: Start with false and only show if no valid session exists
+  // Authentication states
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authenticatedStaff, setAuthenticatedStaff] = useState<any>(null);
   const [loginMethod, setLoginMethod] = useState<'pin' | 'credentials' | null>(null);
@@ -89,28 +89,22 @@ const StaffDashboard = () => {
     const now = new Date();
     const expiryDate = new Date(member.expiry_date);
     
-    // If expiry date has passed, member is actually expired regardless of database status
     if (expiryDate < now) {
       return 'expired';
     }
     
-    // If member is suspended in database, keep that status
     if (member.status === 'suspended') {
       return 'suspended';
     }
     
-    // Otherwise, member is active
     return 'active';
   };
 
-  // Helper function to determine if member can be renewed - DEFINED EARLY
+  // Helper function to determine if member can be renewed
   const canRenewMember = (member: Member) => {
     const now = new Date();
     const expiryDate = new Date(member.expiry_date);
     
-    // Member can be renewed if:
-    // 1. Status is explicitly 'expired', OR
-    // 2. Expiry date has passed (regardless of status)
     return member.status === 'expired' || expiryDate < now;
   };
 
@@ -129,11 +123,10 @@ const StaffDashboard = () => {
     return diffDays;
   };
 
-  // FIXED: Better session detection and authentication flow
+  // Authentication check effect
   useEffect(() => {
     console.log('🔍 StaffDashboard: Checking authentication state...');
     
-    // Check if user came from branch credential login
     const branchSession = localStorage.getItem('branch_session');
     const locationState = location.state;
     
@@ -145,12 +138,11 @@ const StaffDashboard = () => {
         if (sessionData.branchId === branchId && sessionData.userType === 'branch_staff') {
           console.log('✅ Valid branch session found, auto-authenticating...');
           
-          // Auto-authenticate with branch credentials
           setAuthenticatedStaff({
             id: 'branch_staff',
             first_name: 'Branch',
             last_name: 'Staff',
-            role: 'manager', // Branch credential users get manager level access
+            role: 'manager',
             branch_id: branchId,
             email: sessionData.branchEmail,
             login_method: 'credentials'
@@ -158,18 +150,17 @@ const StaffDashboard = () => {
           setLoginMethod('credentials');
           setShowAuthModal(false);
           console.log('✅ Auto-authenticated via branch credentials');
-          return; // Exit early, don't show auth modal
+          return;
         } else {
           console.log('⚠️ Branch session branch ID mismatch or invalid type');
-          localStorage.removeItem('branch_session'); // Clear invalid session
+          localStorage.removeItem('branch_session');
         }
       } catch (error) {
         console.error('❌ Error parsing branch session:', error);
-        localStorage.removeItem('branch_session'); // Clear invalid session
+        localStorage.removeItem('branch_session');
       }
     }
     
-    // Also check location state from navigation
     if (locationState?.authenticated && locationState?.branchData) {
       console.log('🚀 Authenticated via navigation state');
       setAuthenticatedStaff({
@@ -183,16 +174,15 @@ const StaffDashboard = () => {
       });
       setLoginMethod('credentials');
       setShowAuthModal(false);
-      return; // Exit early, don't show auth modal
+      return;
     }
     
-    // If no valid session found, show auth modal
     console.log('❌ No valid authentication found, showing auth modal');
     setShowAuthModal(true);
     
   }, [branchId, location.state]);
 
-  // FIXED: Only fetch data when we have authenticated staff
+  // Data fetching effect
   useEffect(() => {
     if (authenticatedStaff && branchId) {
       console.log('📊 Authenticated staff found, fetching dashboard data...');
@@ -224,7 +214,9 @@ const StaffDashboard = () => {
 
   const fetchBranchPackages = async (branchId: string) => {
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/branch/${branchId}`);
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/branch/${branchId}`, {
+        headers: getAuthHeaders() // ✅ Added auth headers
+      });
       const result = await response.json();
       
       if (result.status === 'success') {
@@ -243,9 +235,8 @@ const StaffDashboard = () => {
     const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
     const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     
-    // Use actual status calculation for more accurate stats
     const activeMembers = members.filter(m => getActualMemberStatus(m) === 'active').length;
-    const expiredMembers = members.filter(m => canRenewMember(m)).length; // Use canRenewMember for consistency
+    const expiredMembers = members.filter(m => canRenewMember(m)).length;
     const expiringMembers = members.filter(m => {
       const expiryDate = new Date(m.expiry_date);
       return getActualMemberStatus(m) === 'active' && expiryDate <= nextWeek && expiryDate > now;
@@ -278,7 +269,7 @@ const StaffDashboard = () => {
       newMembersThisMonth,
       retentionRate,
       seniorStaffCount,
-      todayCheckIns: 0 // Disabled check-ins feature
+      todayCheckIns: 0
     };
   };
 
@@ -290,15 +281,12 @@ const StaffDashboard = () => {
     if (statusFilter === 'all') {
       matchesStatus = true;
     } else if (statusFilter === 'expired') {
-      // Use the same logic as canRenewMember for expired filter
       matchesStatus = canRenewMember(member);
     } else if (statusFilter === 'expiring') {
       matchesStatus = isExpiringSoon(member);
     } else if (statusFilter === 'active') {
-      // Use actual status for active filter
       matchesStatus = getActualMemberStatus(member) === 'active';
     } else {
-      // For other statuses (suspended), use the actual status
       matchesStatus = getActualMemberStatus(member) === statusFilter;
     }
     
@@ -342,35 +330,19 @@ const StaffDashboard = () => {
     if (!memberToDelete) return;
 
     try {
-      // Get auth token if available (for development, this might be optional based on your middleware)
-      const authToken = localStorage.getItem('access_token');
-      
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      
-      // Add auth header if token exists
-      if (authToken) {
-        headers['Authorization'] = `Bearer ${authToken}`;
-      }
-
-      // Use full backend URL - your backend runs on port 5001
-      const response = await fetch(`http://localhost:5001/api/members/${memberToDelete.id}`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/members/${memberToDelete.id}`, {
         method: 'DELETE',
-        headers,
+        headers: getAuthHeaders(), // ✅ Added auth headers
       });
 
-      // Check if response is ok first
       if (!response.ok) {
         console.error(`❌ HTTP Error: ${response.status} ${response.statusText}`);
         
-        // Try to get error message from response
         let errorMessage = `Failed to delete member (${response.status})`;
         try {
           const errorData = await response.json();
           errorMessage = errorData.error || errorData.message || errorMessage;
         } catch {
-          // If response isn't JSON, use status text
           errorMessage = `${response.status}: ${response.statusText}`;
         }
         
@@ -380,37 +352,40 @@ const StaffDashboard = () => {
       const result = await response.json();
 
       if (result.status === 'success') {
-        // Show success message
         console.log('✅ Member deleted successfully');
         
-        // Refresh members data
         if (branchId) {
           const { data } = await db.members.getByBranch(branchId);
           if (data) setMembers(data);
         }
         
-        // Close dialog and reset state
         setDeleteConfirmOpen(false);
         setMemberToDelete(null);
+
+        toast({
+          title: "Member Deleted",
+          description: `${memberToDelete.first_name} ${memberToDelete.last_name} has been deleted successfully`,
+        });
       } else {
         console.error('❌ Failed to delete member:', result.error);
         throw new Error(result.error || 'Failed to delete member');
       }
     } catch (error) {
       console.error('❌ Error deleting member:', error);
-      // Keep dialog open so user knows something went wrong
-      alert(`Failed to delete member: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      toast({
+        title: "Error",
+        description: `Failed to delete member: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        variant: "destructive",
+      });
     }
   };
 
-  // FIXED: Updated handleAuthentication function
   const handleAuthentication = (staff: any) => {
     console.log('🔐 PIN authentication successful:', staff);
     setAuthenticatedStaff(staff);
     setLoginMethod('pin');
     setShowAuthModal(false);
     
-    // FIXED: Update the branch session to include PIN auth info
     const existingSession = localStorage.getItem('branch_session');
     if (existingSession) {
       try {
@@ -418,13 +393,11 @@ const StaffDashboard = () => {
         sessionData.staffInfo = staff;
         sessionData.authMethod = 'pin';
         localStorage.setItem('branch_session', JSON.stringify(sessionData));
-        // Notify navbar of the update
         window.dispatchEvent(new Event('storage'));
       } catch (error) {
         console.error('Error updating session with staff info:', error);
       }
     } else {
-      // Create new session for PIN auth
       const sessionData = {
         sessionToken: `pin_${Date.now()}`,
         branchId: branchId,
@@ -443,18 +416,13 @@ const StaffDashboard = () => {
   const handleLogout = () => {
     console.log('🔐 Logging out from staff dashboard...');
     
-    // Clear branch session if exists
     localStorage.removeItem('branch_session');
-    
-    // Notify navbar immediately
     window.dispatchEvent(new Event('storage'));
     
-    // Reset authentication state
     setAuthenticatedStaff(null);
     setLoginMethod(null);
     setShowAuthModal(true);
     
-    // Navigate back to login
     window.location.href = '/login';
   };
 
@@ -512,9 +480,7 @@ const StaffDashboard = () => {
     try {
       const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: getAuthHeaders(), // ✅ Fixed: Using getAuthHeaders() instead of manual headers
         body: JSON.stringify({
           branch_id: branchId,
           name: packageForm.name,
@@ -573,9 +539,7 @@ const StaffDashboard = () => {
     try {
       const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/${selectedPackage.id}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: getAuthHeaders(), // ✅ Fixed: Using getAuthHeaders()
         body: JSON.stringify({
           name: packageForm.name,
           type: packageForm.type,
@@ -601,7 +565,6 @@ const StaffDashboard = () => {
       setSelectedPackage(null);
       setIsEditPackageOpen(false);
       
-      // Refresh packages
       if (branchId) {
         const packagesData = await fetchBranchPackages(branchId);
         if (packagesData.data) setPackages(packagesData.data);
@@ -621,9 +584,7 @@ const StaffDashboard = () => {
     try {
       const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/${id}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: getAuthHeaders(), // ✅ Fixed: Using getAuthHeaders()
         body: JSON.stringify({
           is_active: !currentStatus
         }),
@@ -640,7 +601,6 @@ const StaffDashboard = () => {
         description: `Package ${!currentStatus ? 'activated' : 'deactivated'} successfully`,
       });
       
-      // Refresh packages
       if (branchId) {
         const packagesData = await fetchBranchPackages(branchId);
         if (packagesData.data) setPackages(packagesData.data);
@@ -664,9 +624,7 @@ const StaffDashboard = () => {
     try {
       const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/${id}`, {
         method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: getAuthHeaders(), // ✅ Fixed: Using getAuthHeaders()
       });
 
       const result = await response.json();
@@ -680,7 +638,6 @@ const StaffDashboard = () => {
         description: `${packageName} has been deleted successfully`,
       });
       
-      // Refresh packages
       if (branchId) {
         const packagesData = await fetchBranchPackages(branchId);
         if (packagesData.data) setPackages(packagesData.data);
@@ -698,7 +655,7 @@ const StaffDashboard = () => {
 
   const stats = getStatsData();
 
-  // FIXED: Better loading state management
+  // Loading state management
   if (!authenticatedStaff) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -1157,7 +1114,6 @@ const StaffDashboard = () => {
                         <Select 
                           value={packageForm.type} 
                           onValueChange={(value: 'individual' | 'couple' | 'family') => {
-                            // Auto-set max_members based on type
                             const defaultMaxMembers = value === 'individual' ? '1' : 
                                                      value === 'couple' ? '2' : '4';
                             setPackageForm(prev => ({ 
@@ -1240,7 +1196,7 @@ const StaffDashboard = () => {
                         <p className="text-sm text-muted-foreground">
                           <strong>{packageForm.name}</strong> - {packageForm.type} package for up to{' '}
                           <strong className="text-primary">{packageForm.max_members} people</strong>
-                          {packageForm.price && ` at ${packageForm.price}`}
+                          {packageForm.price && ` at $${packageForm.price}`}
                           {packageForm.duration_months && ` for ${packageForm.duration_months} month${parseInt(packageForm.duration_months) > 1 ? 's' : ''}`}
                         </p>
                       </div>
@@ -1343,7 +1299,6 @@ const StaffDashboard = () => {
 
           <TabsContent value="staff" className="space-y-6">
             <StaffManagement staff={staff} branchId={branchId!} onStaffUpdate={() => {
-              // Refresh staff data
               if (branchId) {
                 db.staff.getByBranch(branchId).then(({ data }) => {
                   if (data) setStaff(data);
@@ -1466,7 +1421,6 @@ const StaffDashboard = () => {
           onOpenChange={setShowAddNew}
           branchId={branchId!}
           onMemberAdded={() => {
-            // Refresh members data
             if (branchId) {
               db.members.getByBranch(branchId).then(({ data }) => {
                 if (data) setMembers(data);
@@ -1480,7 +1434,6 @@ const StaffDashboard = () => {
           onOpenChange={setShowAddExisting}
           branchId={branchId!}
           onMemberAdded={() => {
-            // Refresh members data
             if (branchId) {
               db.members.getByBranch(branchId).then(({ data }) => {
                 if (data) setMembers(data);
@@ -1503,7 +1456,6 @@ const StaffDashboard = () => {
               member={selectedMember}
               branchId={branchId!}
               onRenewalComplete={() => {
-                // Refresh members data
                 if (branchId) {
                   db.members.getByBranch(branchId).then(({ data }) => {
                     if (data) setMembers(data);
