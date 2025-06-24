@@ -11,7 +11,7 @@ import {
   Mail, Phone, MapPin, User, CreditCard, Calendar, Shield, 
   Package, UserPlus, Search, X, Users, Check, CheckCircle, Copy
 } from 'lucide-react';
-import { db } from '@/lib/supabase';
+import { db, getAuthHeaders } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
 import type { Package as PackageType, BranchStaff, Member } from '@/types';
 
@@ -442,12 +442,22 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
         }
       }
 
-      await db.actionLogs.create({
-        staff_id: verification.staffId,
-        action_type: 'MEMBER_ADDED',
-        description: `Added ${memberForms.length} member(s) with ${selectedPackage!.name} package`,
-        created_at: new Date().toISOString()
+      // Log the action via API
+      const logResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/action-logs`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          staff_id: verification.staffId,
+          action_type: 'MEMBER_ADDED',
+          description: `Added ${memberForms.length} member(s) with ${selectedPackage!.name} package`,
+          created_at: new Date().toISOString()
+        }),
       });
+
+      // Log action creation is not critical, so don't fail if it errors
+      if (!logResponse.ok) {
+        console.warn('Failed to create action log, but member creation was successful');
+      }
 
       setCreatedAccounts(accounts);
       setCurrentStep('success');

@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Calendar, CreditCard, User, CheckCircle, Package as PackageIcon, Shield } from 'lucide-react';
-import { db } from '@/lib/supabase';
+import { db, getAuthHeaders } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
 import { Member, Package as PackageType, PaymentMethod, BranchStaff } from '@/types';
 
@@ -121,36 +121,60 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
       const newExpiry = new Date(currentExpiry);
       newExpiry.setMonth(newExpiry.getMonth() + parseInt(duration));
 
-      const renewalData = {
-        member_id: member.id,
-        package_id: selectedPackage.id,
-        payment_method: paymentMethod,
-        amount_paid: parseFloat(price),
-        previous_expiry: member.expiry_date,
-        new_expiry: newExpiry.toISOString(),
-        renewed_by_staff_id: verification.staffId
-      };
-
-      const { error: renewalError } = await db.renewals.create(renewalData);
-      if (renewalError) throw renewalError;
-
-      // Update member
-      const { error: updateError } = await db.members.update(member.id, {
-        expiry_date: newExpiry.toISOString(),
-        status: 'active',
-        package_name: selectedPackage.name,
-        package_price: parseFloat(price),
-        processed_by_staff_id: verification.staffId
+      // Create renewal via API instead of direct Supabase
+      const renewalResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/renewals`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          member_id: member.id,
+          package_id: selectedPackage.id,
+          payment_method: paymentMethod,
+          amount_paid: parseFloat(price),
+          previous_expiry: member.expiry_date,
+          new_expiry: newExpiry.toISOString(),
+          renewed_by_staff_id: verification.staffId
+        }),
       });
-      if (updateError) throw updateError;
 
-      // Log the action
-      await db.actionLogs.create({
-        staff_id: verification.staffId,
-        action_type: 'MEMBER_RENEWED',
-        description: `Renewed membership for ${member.first_name} ${member.last_name} with ${selectedPackage.name} package`,
-        created_at: new Date().toISOString()
+      if (!renewalResponse.ok) {
+        const errorData = await renewalResponse.json();
+        throw new Error(errorData.error || 'Failed to create renewal record');
+      }
+
+      // Update member via API
+      const updateResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/members/${member.id}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          expiry_date: newExpiry.toISOString(),
+          status: 'active',
+          package_name: selectedPackage.name,
+          package_price: parseFloat(price),
+          processed_by_staff_id: verification.staffId
+        }),
       });
+
+      if (!updateResponse.ok) {
+        const errorData = await updateResponse.json();
+        throw new Error(errorData.error || 'Failed to update member');
+      }
+
+      // Log the action via API
+      const logResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/action-logs`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          staff_id: verification.staffId,
+          action_type: 'MEMBER_RENEWED',
+          description: `Renewed membership for ${member.first_name} ${member.last_name} with ${selectedPackage.name} package`,
+          created_at: new Date().toISOString()
+        }),
+      });
+
+      // Log action creation is not critical, so don't fail if it errors
+      if (!logResponse.ok) {
+        console.warn('Failed to create action log, but renewal was successful');
+      }
 
       toast({
         title: "Success",
@@ -163,7 +187,7 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
       console.error('Error renewing membership:', error);
       toast({
         title: "Error",
-        description: "Failed to renew membership",
+        description: error instanceof Error ? error.message : "Failed to renew membership",
         variant: "destructive",
       });
     } finally {
