@@ -22,7 +22,7 @@ import {
   FileText,
   CalendarDays
 } from 'lucide-react';
-import { db } from '@/lib/supabase';
+import { db, getAuthHeaders } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
 
 interface AnalyticsData {
@@ -111,7 +111,6 @@ const AnalyticsTab = ({ branchId, branchName }: AnalyticsTabProps) => {
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
   const [showDownloadModal, setShowDownloadModal] = useState(false);
-  const [downloadPeriod, setDownloadPeriod] = useState('');
   const [downloadLoading, setDownloadLoading] = useState(false);
   const { toast } = useToast();
 
@@ -172,34 +171,15 @@ const AnalyticsTab = ({ branchId, branchName }: AnalyticsTabProps) => {
     }
   };
 
-  const getDateRange = (period: string) => {
-    const now = new Date();
-    let startDate, endDate;
-
-    switch (period) {
-      case 'current_month':
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-        break;
-      case 'past_month':
-        startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        endDate = new Date(now.getFullYear(), now.getMonth(), 0);
-        break;
-      case 'past_3_months':
-        startDate = new Date(now.getFullYear(), now.getMonth() - 3, 1);
-        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-        break;
-      default:
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const getCurrentPeriodLabel = () => {
+    switch (dateRange) {
+      case 'week': return 'This Week';
+      case 'month': return 'This Month';
+      case 'quarter': return 'This Quarter';
+      case 'year': return 'This Year';
+      case 'custom': return 'Custom Period';
+      default: return 'This Month';
     }
-
-    return {
-      start: startDate.toISOString().split('T')[0],
-      end: endDate.toISOString().split('T')[0],
-      startFormatted: startDate.toLocaleDateString(),
-      endFormatted: endDate.toLocaleDateString()
-    };
   };
 
   const fetchAdditionalData = async () => {
@@ -211,7 +191,9 @@ const AnalyticsTab = ({ branchId, branchName }: AnalyticsTabProps) => {
       const { data: staffData } = await db.staff.getByBranch(branchId);
       
       // Fetch packages data
-      const packagesResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/branch/${branchId}`);
+      const packagesResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/branch/${branchId}`, {
+        headers: getAuthHeaders()
+      });
       const packagesResult = await packagesResponse.json();
       const packagesData = packagesResult.status === 'success' ? packagesResult.data : [];
 
@@ -235,27 +217,29 @@ const AnalyticsTab = ({ branchId, branchName }: AnalyticsTabProps) => {
     }
   };
 
-  const generateComprehensiveCSV = async (period: string) => {
+  const generateCSVReport = async () => {
+    if (!analytics) {
+      toast({
+        title: "No Data",
+        description: "No analytics data available to generate report",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setDownloadLoading(true);
     
     try {
-      const dateRange = getDateRange(period);
-      
-      // Fetch analytics data for the specific period
-      const { data: analyticsData } = await db.analytics.getBranchAnalytics(branchId, dateRange.start, dateRange.end);
-      
       // Fetch additional data
       const additionalData = await fetchAdditionalData();
       
-      if (!analyticsData) {
-        throw new Error('No analytics data available');
-      }
-
-      const periodLabel = period === 'current_month' ? 'Current Month' : 
-                         period === 'past_month' ? 'Past Month' : 'Past 3 Months';
+      const periodLabel = getCurrentPeriodLabel();
 
       // Generate comprehensive CSV content
-      const csvContent = generateCSVContent(analyticsData, additionalData, periodLabel, dateRange);
+      const csvContent = generateCSVContent(analytics, additionalData, periodLabel, {
+        startFormatted: new Date(analytics.period.start).toLocaleDateString(),
+        endFormatted: new Date(analytics.period.end).toLocaleDateString()
+      });
       
       // Download the CSV
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -269,23 +253,187 @@ const AnalyticsTab = ({ branchId, branchName }: AnalyticsTabProps) => {
       window.URL.revokeObjectURL(url);
 
       toast({
-        title: "Download Complete",
+        title: "CSV Download Complete! 📊",
         description: `${periodLabel} analytics report downloaded successfully`,
       });
 
       setShowDownloadModal(false);
-      setDownloadPeriod('');
       
     } catch (error) {
       console.error('Error generating CSV:', error);
       toast({
         title: "Download Failed",
-        description: "Failed to generate analytics report",
+        description: "Failed to generate CSV report",
         variant: "destructive",
       });
     } finally {
       setDownloadLoading(false);
     }
+  };
+
+  const generatePDFReport = async () => {
+    if (!analytics) {
+      toast({
+        title: "No Data",
+        description: "No analytics data available to generate report",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setDownloadLoading(true);
+    
+    try {
+      // For now, we'll create a simple HTML report that can be printed as PDF
+      const additionalData = await fetchAdditionalData();
+      const periodLabel = getCurrentPeriodLabel();
+      
+      // Create a new window with formatted HTML content
+      const htmlContent = generateHTMLReport(analytics, additionalData, periodLabel);
+      
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.write(htmlContent);
+        printWindow.document.close();
+        printWindow.focus();
+        
+        // Automatically trigger print dialog
+        setTimeout(() => {
+          printWindow.print();
+        }, 500);
+      }
+
+      toast({
+        title: "PDF Report Opened! 📄",
+        description: `${periodLabel} report opened in new window. Use browser's print function to save as PDF.`,
+      });
+
+      setShowDownloadModal(false);
+      
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      toast({
+        title: "PDF Generation Failed",
+        description: "Failed to generate PDF report. Please try CSV format.",
+        variant: "destructive",
+      });
+    } finally {
+      setDownloadLoading(false);
+    }
+  };
+
+  const generateHTMLReport = (analytics: AnalyticsData, additionalData: any, periodLabel: string) => {
+    const { members, staff, packages } = additionalData;
+    
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>FitGym Pro Analytics Report - ${branchName}</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; color: #333; }
+        .header { background: #2980b9; color: white; padding: 20px; margin: -40px -40px 30px -40px; }
+        .header h1 { margin: 0; font-size: 24px; }
+        .header p { margin: 5px 0 0 0; opacity: 0.9; }
+        .section { margin: 30px 0; }
+        .section h2 { color: #2980b9; border-bottom: 2px solid #2980b9; padding-bottom: 5px; }
+        .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 20px 0; }
+        .metric-card { background: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 4px solid #2980b9; }
+        .metric-value { font-size: 24px; font-weight: bold; color: #2980b9; }
+        .metric-label { font-size: 14px; color: #666; margin-bottom: 5px; }
+        table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #f8f9fa; font-weight: bold; }
+        .footer { margin-top: 50px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
+        @media print { body { margin: 20px; } .header { margin: -20px -20px 20px -20px; } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>FitGym Pro Analytics Report</h1>
+        <p>${branchName} • ${periodLabel} • ${new Date(analytics.period.start).toLocaleDateString()} - ${new Date(analytics.period.end).toLocaleDateString()}</p>
+    </div>
+
+    <div class="section">
+        <h2>Executive Summary</h2>
+        <div class="metrics">
+            <div class="metric-card">
+                <div class="metric-label">Total Revenue</div>
+                <div class="metric-value">$${analytics.revenue.total.toFixed(2)}</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Total Members</div>
+                <div class="metric-value">${analytics.memberAnalytics.total}</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Active Members</div>
+                <div class="metric-value">${analytics.memberAnalytics.active}</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Daily Average</div>
+                <div class="metric-value">$${analytics.revenue.dailyAverage.toFixed(2)}</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Retention Rate</div>
+                <div class="metric-value">${analytics.memberAnalytics.retentionRate}%</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">New Members</div>
+                <div class="metric-value">${analytics.memberAnalytics.newThisPeriod}</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Revenue Breakdown</h2>
+        <table>
+            <tr><th>Category</th><th>Amount</th><th>Percentage</th></tr>
+            <tr><td>New Memberships</td><td>$${analytics.revenue.newMemberships.toFixed(2)}</td><td>${((analytics.revenue.newMemberships / analytics.revenue.total) * 100).toFixed(1)}%</td></tr>
+            <tr><td>Renewals</td><td>$${analytics.revenue.renewals.toFixed(2)}</td><td>${((analytics.revenue.renewals / analytics.revenue.total) * 100).toFixed(1)}%</td></tr>
+            <tr><td>Upgrades</td><td>$${analytics.revenue.upgrades.toFixed(2)}</td><td>${((analytics.revenue.upgrades / analytics.revenue.total) * 100).toFixed(1)}%</td></tr>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>Member Analytics</h2>
+        <table>
+            <tr><th>Metric</th><th>Count</th><th>Percentage</th></tr>
+            <tr><td>Total Members</td><td>${analytics.memberAnalytics.total}</td><td>100.0%</td></tr>
+            <tr><td>Active Members</td><td>${analytics.memberAnalytics.active}</td><td>${((analytics.memberAnalytics.active / analytics.memberAnalytics.total) * 100).toFixed(1)}%</td></tr>
+            <tr><td>Expired Members</td><td>${analytics.memberAnalytics.expired}</td><td>${((analytics.memberAnalytics.expired / analytics.memberAnalytics.total) * 100).toFixed(1)}%</td></tr>
+            <tr><td>New This Period</td><td>${analytics.memberAnalytics.newThisPeriod}</td><td>${((analytics.memberAnalytics.newThisPeriod / analytics.memberAnalytics.total) * 100).toFixed(1)}%</td></tr>
+        </table>
+    </div>
+
+    ${analytics.packagePerformance.length > 0 ? `
+    <div class="section">
+        <h2>Package Performance</h2>
+        <table>
+            <tr><th>Package</th><th>Type</th><th>Sales</th><th>Revenue</th></tr>
+            ${analytics.packagePerformance.map(pkg => 
+                `<tr><td>${pkg.name}</td><td>${pkg.type}</td><td>${pkg.sales}</td><td>$${pkg.revenue.toFixed(2)}</td></tr>`
+            ).join('')}
+        </table>
+    </div>
+    ` : ''}
+
+    ${analytics.staffPerformance.length > 0 ? `
+    <div class="section">
+        <h2>Staff Performance</h2>
+        <table>
+            <tr><th>Staff</th><th>Role</th><th>New Members</th><th>Renewals</th><th>Revenue</th></tr>
+            ${analytics.staffPerformance.map(staff => 
+                `<tr><td>${staff.name}</td><td>${staff.role.replace('_', ' ')}</td><td>${staff.newMembers}</td><td>${staff.renewals}</td><td>$${staff.revenue.toFixed(2)}</td></tr>`
+            ).join('')}
+        </table>
+    </div>
+    ` : ''}
+
+    <div class="footer">
+        <p>Generated by FitGym Pro Analytics on ${new Date().toLocaleString()} | Report contains ${analytics.transactions.length} transactions</p>
+    </div>
+</body>
+</html>`;
   };
 
   const generateCSVContent = (analytics: AnalyticsData, additionalData: any, periodLabel: string, dateRange: any) => {
@@ -512,63 +660,63 @@ const AnalyticsTab = ({ branchId, branchName }: AnalyticsTabProps) => {
                   Download Analytics Report
                 </DialogTitle>
               </DialogHeader>
-              <div className="space-y-4">
+              <div className="space-y-6">
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                   <div className="flex items-center gap-2 text-blue-800 font-medium mb-2">
                     <BarChart3 className="h-4 w-4" />
-                    Comprehensive Analytics Report
+                    Report for {getCurrentPeriodLabel()}
                   </div>
                   <p className="text-sm text-blue-600">
-                    Download a detailed CSV report including revenue, members, staff, packages, and all analytics data for {branchName}.
+                    Download analytics report for {branchName} covering {new Date(analytics.period.start).toLocaleDateString()} to {new Date(analytics.period.end).toLocaleDateString()}.
                   </p>
                 </div>
 
-                <div>
-                  <Label htmlFor="downloadPeriod">Select Report Period</Label>
-                  <Select value={downloadPeriod} onValueChange={setDownloadPeriod}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Choose time period" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="current_month">
-                        <div className="flex items-center gap-2">
-                          <CalendarDays className="h-4 w-4" />
-                          Current Month Analytics
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="past_month">
-                        <div className="flex items-center gap-2">
-                          <Calendar className="h-4 w-4" />
-                          Past Month Analytics
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="past_3_months">
-                        <div className="flex items-center gap-2">
-                          <TrendingUp className="h-4 w-4" />
-                          Past 3 Months Analytics
-                        </div>
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
+                <div className="text-center">
+                  <p className="text-sm text-muted-foreground mb-4">Choose your preferred format:</p>
+                  
+                  <div className="grid grid-cols-1 gap-3">
+                    <Button 
+                      onClick={generatePDFReport}
+                      disabled={downloadLoading}
+                      className="h-16 flex flex-col items-center justify-center gap-2 bg-red-600 hover:bg-red-700"
+                    >
+                      {downloadLoading ? (
+                        <>
+                          <RefreshCw className="h-5 w-5 animate-spin" />
+                          <span className="text-sm">Generating...</span>
+                        </>
+                      ) : (
+                        <>
+                          <FileText className="h-5 w-5" />
+                          <span className="font-medium">Professional PDF Report</span>
+                          <span className="text-xs opacity-90">Formatted, printable document</span>
+                        </>
+                      )}
+                    </Button>
+                    
+                    <Button 
+                      onClick={generateCSVReport}
+                      disabled={downloadLoading}
+                      variant="outline"
+                      className="h-16 flex flex-col items-center justify-center gap-2"
+                    >
+                      {downloadLoading ? (
+                        <>
+                          <RefreshCw className="h-5 w-5 animate-spin" />
+                          <span className="text-sm">Generating...</span>
+                        </>
+                      ) : (
+                        <>
+                          <BarChart3 className="h-5 w-5" />
+                          <span className="font-medium">CSV Data Export</span>
+                          <span className="text-xs opacity-70">Raw data for analysis</span>
+                        </>
+                      )}
+                    </Button>
+                  </div>
                 </div>
 
-                {downloadPeriod && (
-                  <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                    <h4 className="font-medium text-green-800 mb-2">Report will include:</h4>
-                    <ul className="text-sm text-green-700 space-y-1">
-                      <li>• Executive summary and key metrics</li>
-                      <li>• Revenue analysis and comparisons</li>
-                      <li>• Member analytics and distribution</li>
-                      <li>• Package and staff performance</li>
-                      <li>• Daily performance data</li>
-                      <li>• Detailed transaction records</li>
-                      <li>• Current staff and package directories</li>
-                      <li>• Branch information and statistics</li>
-                    </ul>
-                  </div>
-                )}
-
-                <div className="flex gap-2 pt-4">
+                <div className="flex gap-2 pt-2">
                   <Button 
                     variant="outline" 
                     onClick={() => setShowDownloadModal(false)}
@@ -576,23 +724,6 @@ const AnalyticsTab = ({ branchId, branchName }: AnalyticsTabProps) => {
                     disabled={downloadLoading}
                   >
                     Cancel
-                  </Button>
-                  <Button 
-                    onClick={() => generateComprehensiveCSV(downloadPeriod)}
-                    disabled={!downloadPeriod || downloadLoading}
-                    className="flex-1"
-                  >
-                    {downloadLoading ? (
-                      <>
-                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                        Generating...
-                      </>
-                    ) : (
-                      <>
-                        <Download className="h-4 w-4 mr-2" />
-                        Download CSV
-                      </>
-                    )}
                   </Button>
                 </div>
               </div>
