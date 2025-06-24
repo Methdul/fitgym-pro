@@ -26,9 +26,37 @@ app.use(helmet());
 app.use(morgan('combined'));
 
 // CORS middleware
+// CORS middleware - Updated to handle multiple URLs
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-  credentials: true
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'http://localhost:5173',
+      'https://fitgym-pro-system.vercel.app',           // Production URL
+      /^https:\/\/fitgym-pro-system.*\.vercel\.app$/    // All Vercel preview URLs
+    ];
+    
+    // Check if origin is allowed
+    const isAllowed = allowedOrigins.some(pattern => {
+      if (typeof pattern === 'string') {
+        return pattern === origin;
+      }
+      return pattern.test(origin); // For regex patterns
+    });
+    
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      console.log('❌ CORS blocked origin:', origin);
+      callback(new Error(`CORS policy: Origin ${origin} not allowed`));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Session-Token']
 }));
 
 // Body parsing middleware
