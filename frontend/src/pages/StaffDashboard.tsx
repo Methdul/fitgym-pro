@@ -504,117 +504,45 @@ const StaffDashboard = () => {
   };
 
   const handleAddPackage = async () => {
-  if (!validatePackageForm() || !branchId) return;
+    alert("DEBUG: Function is running!"); // ADD THIS LINE FIRST
+    console.log("🔍 DEBUG: Function started"); // ADD THIS LINE TOO
+    if (!validatePackageForm() || !branchId) return;
 
-  // DEBUG: Check what's happening in getAuthHeaders
-  console.log('🔍 DEBUG: Checking authentication...');
-  
-  // Check what's in localStorage
-  const branchSession = localStorage.getItem('branch_session');
-  const staffToken = localStorage.getItem('staff_session_token');
-  
-  console.log('📱 Staff token in localStorage:', staffToken ? 'EXISTS' : 'MISSING');
-  console.log('🏢 Branch session in localStorage:', branchSession ? 'EXISTS' : 'MISSING');
-  
-  if (branchSession) {
-    try {
-      const parsed = JSON.parse(branchSession);
-      console.log('🎫 Session token in branch_session:', parsed.sessionToken ? 'EXISTS' : 'MISSING');
-      console.log('🎫 Actual token value:', parsed.sessionToken);
-    } catch (e) {
-      console.error('❌ Error parsing branch session:', e);
-    }
-  }
-  
-  // Check what getAuthHeaders returns
-  const headers = getAuthHeaders();
-  console.log('📤 Generated headers:', headers);
-  console.log('🔍 Has Authorization header:', !!headers.Authorization);
-  console.log('🔍 Has X-Session-Token header:', !!headers['X-Session-Token']);
-  
-  if (!headers.Authorization && !headers['X-Session-Token']) {
-    console.error('❌ NO AUTH HEADERS GENERATED!');
-    toast({
-      title: "Debug: Authentication Headers Missing",
-      description: "No auth headers generated. Check console for details.",
-      variant: "destructive",
-    });
-    return;
-  }
-
-  // Check authentication before making request
-  if (!isAuthenticated()) {
-    toast({
-      title: "Authentication Required",
-      description: "Please log in again to continue",
-      variant: "destructive",
-    });
-    setShowAuthModal(true);
-    return;
-  }
-
-  try {
-    console.log('🔧 Adding package with auth headers...');
-    const authHeaders = getAuthHeaders();
-    console.log('📤 Request headers being sent:', Object.keys(authHeaders));
-
-    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages`, {
-      method: 'POST',
-      headers: authHeaders,
-      body: JSON.stringify({
-        branch_id: branchId,
-        name: packageForm.name,
-        type: packageForm.type,
-        price: parseFloat(packageForm.price),
-        duration_months: parseInt(packageForm.duration_months),
-        max_members: parseInt(packageForm.max_members),
-        features: packageForm.features.length > 0 ? packageForm.features : ['Gym Access', 'Locker Room']
-      }),
-    });
-
-    const result = await response.json();
-
-    if (!response.ok || result.status !== 'success') {
-      console.error('❌ Package creation failed:', response.status, result);
-      throw new Error(result.error || `HTTP ${response.status}: Failed to create package`);
-    }
-
-    toast({
-      title: "Package Added",
-      description: `${packageForm.name} has been added successfully`,
-    });
-
-    resetPackageForm();
-    setIsAddPackageOpen(false);
+    // DEBUG: Check what's happening in getAuthHeaders
+    console.log('🔍 DEBUG: Checking authentication...');
     
-    // Refresh packages
-    const packagesData = await fetchBranchPackages(branchId);
-    if (packagesData.data) setPackages(packagesData.data);
-
-  } catch (error) {
-    console.error('Error adding package:', error);
-    toast({
-      title: "Error",
-      description: error instanceof Error ? error.message : "Failed to add package",
-      variant: "destructive",
-    });
-  }
-};
-  const handleEditPackage = (pkg: Package) => {
-    setSelectedPackage(pkg);
-    setPackageForm({
-      name: pkg.name,
-      type: pkg.type,
-      price: pkg.price.toString(),
-      duration_months: pkg.duration_months.toString(),
-      max_members: pkg.max_members.toString(),
-      features: pkg.features
-    });
-    setIsEditPackageOpen(true);
-  };
-
-  const handleUpdatePackage = async () => {
-    if (!validatePackageForm() || !selectedPackage) return;
+    // Check what's in localStorage
+    const branchSession = localStorage.getItem('branch_session');
+    const staffToken = localStorage.getItem('staff_session_token');
+    
+    console.log('📱 Staff token in localStorage:', staffToken ? 'EXISTS' : 'MISSING');
+    console.log('🏢 Branch session in localStorage:', branchSession ? 'EXISTS' : 'MISSING');
+    
+    if (branchSession) {
+      try {
+        const parsed = JSON.parse(branchSession);
+        console.log('🎫 Session token in branch_session:', parsed.sessionToken ? 'EXISTS' : 'MISSING');
+        console.log('🎫 Actual token value:', parsed.sessionToken);
+      } catch (e) {
+        console.error('❌ Error parsing branch session:', e);
+      }
+    }
+    
+    // Check what getAuthHeaders returns
+    const headers = getAuthHeaders();
+    console.log('📤 Generated headers:', headers);
+    console.log('🔍 Has Authorization header:', !!headers.Authorization);
+    console.log('🔍 Has X-Session-Token header:', !!headers['X-Session-Token']);
+    
+    if (!headers.Authorization && !headers['X-Session-Token']) {
+      console.error('❌ NO AUTH HEADERS GENERATED!');
+      toast({
+        title: "Debug: Authentication Headers Missing",
+        description: "No auth headers generated. Check console for details.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     // Check authentication before making request
     if (!isAuthenticated()) {
@@ -628,48 +556,122 @@ const StaffDashboard = () => {
     }
 
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/${selectedPackage.id}`, {
-        method: 'PUT',
-        headers: getAuthHeaders(),
+      console.log('🔧 Adding package with auth headers...');
+      const authHeaders = getAuthHeaders();
+      console.log('📤 Request headers being sent:', Object.keys(authHeaders));
+
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages`, {
+        method: 'POST',
+        headers: authHeaders,
         body: JSON.stringify({
+          branch_id: branchId,
           name: packageForm.name,
           type: packageForm.type,
           price: parseFloat(packageForm.price),
           duration_months: parseInt(packageForm.duration_months),
           max_members: parseInt(packageForm.max_members),
-          features: packageForm.features
+          features: packageForm.features.length > 0 ? packageForm.features : ['Gym Access', 'Locker Room']
         }),
       });
 
       const result = await response.json();
 
       if (!response.ok || result.status !== 'success') {
-        throw new Error(result.error || 'Failed to update package');
+        console.error('❌ Package creation failed:', response.status, result);
+        throw new Error(result.error || `HTTP ${response.status}: Failed to create package`);
       }
 
       toast({
-        title: "Package Updated",
-        description: `${packageForm.name} has been updated successfully`,
+        title: "Package Added",
+        description: `${packageForm.name} has been added successfully`,
       });
 
       resetPackageForm();
-      setSelectedPackage(null);
-      setIsEditPackageOpen(false);
+      setIsAddPackageOpen(false);
       
-      if (branchId) {
-        const packagesData = await fetchBranchPackages(branchId);
-        if (packagesData.data) setPackages(packagesData.data);
-      }
+      // Refresh packages
+      const packagesData = await fetchBranchPackages(branchId);
+      if (packagesData.data) setPackages(packagesData.data);
 
     } catch (error) {
-      console.error('Error updating package:', error);
+      console.error('Error adding package:', error);
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : "Failed to update package",
+        description: error instanceof Error ? error.message : "Failed to add package",
         variant: "destructive",
       });
     }
   };
+    const handleEditPackage = (pkg: Package) => {
+      setSelectedPackage(pkg);
+      setPackageForm({
+        name: pkg.name,
+        type: pkg.type,
+        price: pkg.price.toString(),
+        duration_months: pkg.duration_months.toString(),
+        max_members: pkg.max_members.toString(),
+        features: pkg.features
+      });
+      setIsEditPackageOpen(true);
+    };
+
+    const handleUpdatePackage = async () => {
+      if (!validatePackageForm() || !selectedPackage) return;
+
+      // Check authentication before making request
+      if (!isAuthenticated()) {
+        toast({
+          title: "Authentication Required",
+          description: "Please log in again to continue",
+          variant: "destructive",
+        });
+        setShowAuthModal(true);
+        return;
+      }
+
+      try {
+        const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/${selectedPackage.id}`, {
+          method: 'PUT',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            name: packageForm.name,
+            type: packageForm.type,
+            price: parseFloat(packageForm.price),
+            duration_months: parseInt(packageForm.duration_months),
+            max_members: parseInt(packageForm.max_members),
+            features: packageForm.features
+          }),
+        });
+
+        const result = await response.json();
+
+        if (!response.ok || result.status !== 'success') {
+          throw new Error(result.error || 'Failed to update package');
+        }
+
+        toast({
+          title: "Package Updated",
+          description: `${packageForm.name} has been updated successfully`,
+        });
+
+        resetPackageForm();
+        setSelectedPackage(null);
+        setIsEditPackageOpen(false);
+        
+        if (branchId) {
+          const packagesData = await fetchBranchPackages(branchId);
+          if (packagesData.data) setPackages(packagesData.data);
+        }
+
+      } catch (error) {
+        console.error('Error updating package:', error);
+        toast({
+          title: "Error",
+          description: error instanceof Error ? error.message : "Failed to update package",
+          variant: "destructive",
+        });
+      }
+    };
 
   const handleTogglePackageStatus = async (id: string, currentStatus: boolean) => {
     // Check authentication before making request
