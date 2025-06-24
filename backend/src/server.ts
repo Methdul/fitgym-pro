@@ -25,34 +25,39 @@ app.use(helmet());
 // Logging middleware
 app.use(morgan('combined'));
 
-// CORS middleware
-// CORS middleware - Updated to handle multiple URLs
+
+// CORS middleware - Fixed for production and preview URLs
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173', 
+  'https://fitgym-pro-system.vercel.app',                              // ✅ Production URL
+  'https://fitgym-pro-system-q9r0nktfl-methduls-projects.vercel.app'  // ✅ Current preview URL
+];
+
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
+    console.log('🌐 CORS check for origin:', origin);
     
-    const allowedOrigins = [
-      'http://localhost:3000',
-      'http://localhost:5173',
-      'https://fitgym-pro-system.vercel.app',           // Production URL
-      /^https:\/\/fitgym-pro-system.*\.vercel\.app$/    // All Vercel preview URLs
-    ];
-    
-    // Check if origin is allowed
-    const isAllowed = allowedOrigins.some(pattern => {
-      if (typeof pattern === 'string') {
-        return pattern === origin;
-      }
-      return pattern.test(origin); // For regex patterns
-    });
-    
-    if (isAllowed) {
-      callback(null, true);
-    } else {
-      console.log('❌ CORS blocked origin:', origin);
-      callback(new Error(`CORS policy: Origin ${origin} not allowed`));
+    // Allow requests with no origin (mobile apps, curl, etc.)
+    if (!origin) {
+      console.log('✅ No origin - allowing');
+      return callback(null, true);
     }
+    
+    // Check if origin is in allowed list
+    if (allowedOrigins.includes(origin)) {
+      console.log('✅ Origin allowed:', origin);
+      return callback(null, true);
+    }
+    
+    // Also allow any vercel app URLs as backup
+    if (origin.includes('fitgym-pro-system') && origin.includes('vercel.app')) {
+      console.log('✅ Vercel domain allowed:', origin);
+      return callback(null, true);
+    }
+    
+    console.log('❌ Origin blocked:', origin);
+    callback(new Error(`CORS: Origin ${origin} not allowed`));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
