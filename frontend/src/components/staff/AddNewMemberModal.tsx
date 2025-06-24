@@ -795,7 +795,8 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                   </div>
                 )}
 
-                {totalMembers > 1 && (
+                {/* Fixed navigation for individual packages */}
+                {totalMembers > 1 ? (
                   <div className="flex justify-between items-center pt-4 border-t">
                     <Button
                       variant="outline"
@@ -830,6 +831,22 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                         Continue to Payment
                       </Button>
                     )}
+                  </div>
+                ) : (
+                  // For individual packages (totalMembers === 1)
+                  <div className="flex justify-center pt-4 border-t">
+                    <Button
+                      onClick={() => {
+                        if (canProceedFromCurrentMember()) {
+                          setCurrentStep('payment');
+                          setCurrentMemberIndex(0);
+                        }
+                      }}
+                      disabled={!validateAllMemberForms()}
+                      className="bg-green-600 hover:bg-green-700"
+                    >
+                      Continue to Payment
+                    </Button>
                   </div>
                 )}
               </CardContent>
