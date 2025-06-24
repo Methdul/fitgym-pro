@@ -106,20 +106,18 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     } catch (supabaseError) {
       console.log('🔐 Supabase token verification failed, trying branch session...');
       
-      // If Supabase fails, try branch session token for staff routes
-      if (req.path.includes('/staff') || req.path.includes('/branch')) {
-        try {
-          const branchUser = await verifyBranchToken(token);
-          req.user = branchUser;
-          console.log('✅ Branch session token verified for staff operations');
-          next();
-          return;
-        } catch (branchError) {
-          console.log('❌ Branch session token verification failed:', branchError instanceof Error ? branchError.message : 'Unknown error');
-        }
+      // FIXED: Try branch session token for any route
+      try {
+        const branchUser = await verifyBranchToken(token);
+        req.user = branchUser;
+        console.log('✅ Branch session token verified for operations');
+        next();
+        return;
+      } catch (branchError) {
+        console.log('❌ Branch session token verification failed:', branchError instanceof Error ? branchError.message : 'Unknown error');
       }
       
-      // If both fail, check development mode
+      // Check development mode as final fallback
       if (process.env.NODE_ENV === 'development') {
         console.log('⚠️ DEVELOPMENT: Both auth methods failed - allowing request');
         req.user = { id: 'dev_user', email: 'dev@local.com', role: 'dev' };
