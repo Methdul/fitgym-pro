@@ -121,27 +121,7 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
       const newExpiry = new Date(currentExpiry);
       newExpiry.setMonth(newExpiry.getMonth() + parseInt(duration));
 
-      // Create renewal via API instead of direct Supabase
-      const renewalResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/renewals`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          member_id: member.id,
-          package_id: selectedPackage.id,
-          payment_method: paymentMethod,
-          amount_paid: parseFloat(price),
-          previous_expiry: member.expiry_date,
-          new_expiry: newExpiry.toISOString(),
-          renewed_by_staff_id: verification.staffId
-        }),
-      });
-
-      if (!renewalResponse.ok) {
-        const errorData = await renewalResponse.json();
-        throw new Error(errorData.error || 'Failed to create renewal record');
-      }
-
-      // Update member via API
+      // Update member directly via API (this works as we've seen)
       const updateResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/members/${member.id}`, {
         method: 'PUT',
         headers: getAuthHeaders(),
@@ -149,31 +129,47 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
           expiry_date: newExpiry.toISOString(),
           status: 'active',
           package_name: selectedPackage.name,
+          package_type: selectedPackage.type,
           package_price: parseFloat(price),
-          processed_by_staff_id: verification.staffId
+          processed_by_staff_id: verification.staffId,
+          updated_at: new Date().toISOString(),
+          // Add renewal metadata
+          renewal_info: {
+            previous_expiry: member.expiry_date,
+            renewed_at: new Date().toISOString(),
+            payment_method: paymentMethod,
+            amount_paid: parseFloat(price),
+            renewed_by_staff_id: verification.staffId
+          }
         }),
       });
 
       if (!updateResponse.ok) {
         const errorData = await updateResponse.json();
-        throw new Error(errorData.error || 'Failed to update member');
+        throw new Error(errorData.error || 'Failed to renew membership');
       }
 
-      // Log the action via API
-      const logResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/action-logs`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          staff_id: verification.staffId,
-          action_type: 'MEMBER_RENEWED',
-          description: `Renewed membership for ${member.first_name} ${member.last_name} with ${selectedPackage.name} package`,
-          created_at: new Date().toISOString()
-        }),
-      });
-
-      // Log action creation is not critical, so don't fail if it errors
-      if (!logResponse.ok) {
-        console.warn('Failed to create action log, but renewal was successful');
+      // Log the action via API (optional, won't fail the process)
+      try {
+        await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/action-logs`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            staff_id: verification.staffId,
+            action_type: 'MEMBER_RENEWED',
+            description: `Renewed membership for ${member.first_name} ${member.last_name} with ${selectedPackage.name} package until ${newExpiry.toLocaleDateString()}`,
+            metadata: {
+              member_id: member.id,
+              previous_expiry: member.expiry_date,
+              new_expiry: newExpiry.toISOString(),
+              amount_paid: parseFloat(price),
+              payment_method: paymentMethod
+            },
+            created_at: new Date().toISOString()
+          }),
+        });
+      } catch (logError) {
+        console.warn('Failed to create action log, but renewal was successful:', logError);
       }
 
       toast({
