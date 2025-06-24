@@ -121,69 +121,85 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
       const newExpiry = new Date(currentExpiry);
       newExpiry.setMonth(newExpiry.getMonth() + parseInt(duration));
 
-      // Update member directly via API (this works as we've seen)
+      console.log('🔄 Attempting member renewal update...');
+      
+      // Use simple member update with only basic fields (like member creation)
+      const updateData = {
+        expiry_date: newExpiry.toISOString().split('T')[0], // Date only, no time
+        status: 'active',
+        package_name: selectedPackage.name,
+        package_type: selectedPackage.type,
+        package_price: parseFloat(price),
+        updated_at: new Date().toISOString()
+      };
+
+      console.log('📤 Sending renewal update data:', updateData);
+
       const updateResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/members/${member.id}`, {
         method: 'PUT',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          expiry_date: newExpiry.toISOString(),
-          status: 'active',
-          package_name: selectedPackage.name,
-          package_type: selectedPackage.type,
-          package_price: parseFloat(price),
-          processed_by_staff_id: verification.staffId,
-          updated_at: new Date().toISOString(),
-          // Add renewal metadata
-          renewal_info: {
-            previous_expiry: member.expiry_date,
-            renewed_at: new Date().toISOString(),
-            payment_method: paymentMethod,
-            amount_paid: parseFloat(price),
-            renewed_by_staff_id: verification.staffId
-          }
-        }),
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
+        },
+        body: JSON.stringify(updateData),
       });
 
+      console.log('📥 Update response status:', updateResponse.status);
+
       if (!updateResponse.ok) {
-        const errorData = await updateResponse.json();
-        throw new Error(errorData.error || 'Failed to renew membership');
+        const errorText = await updateResponse.text();
+        console.error('❌ Update failed:', errorText);
+        
+        // Try to parse error response
+        let errorMessage = 'Failed to renew membership';
+        try {
+          const errorData = JSON.parse(errorText);
+          errorMessage = errorData.error || errorData.message || errorMessage;
+        } catch {
+          errorMessage = `Server error (${updateResponse.status}): ${errorText}`;
+        }
+        
+        throw new Error(errorMessage);
       }
 
-      // Log the action via API (optional, won't fail the process)
+      const result = await updateResponse.json();
+      console.log('✅ Renewal update successful:', result);
+
+      // Optional: Log the action (don't fail if this doesn't work)
       try {
+        const logData = {
+          staff_id: verification.staffId,
+          action_type: 'MEMBER_RENEWED',
+          description: `Renewed membership for ${member.first_name} ${member.last_name} with ${selectedPackage.name} package until ${newExpiry.toLocaleDateString()}`,
+          created_at: new Date().toISOString()
+        };
+
         await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/action-logs`, {
           method: 'POST',
-          headers: getAuthHeaders(),
-          body: JSON.stringify({
-            staff_id: verification.staffId,
-            action_type: 'MEMBER_RENEWED',
-            description: `Renewed membership for ${member.first_name} ${member.last_name} with ${selectedPackage.name} package until ${newExpiry.toLocaleDateString()}`,
-            metadata: {
-              member_id: member.id,
-              previous_expiry: member.expiry_date,
-              new_expiry: newExpiry.toISOString(),
-              amount_paid: parseFloat(price),
-              payment_method: paymentMethod
-            },
-            created_at: new Date().toISOString()
-          }),
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders()
+          },
+          body: JSON.stringify(logData),
         });
+        
+        console.log('📝 Action log created successfully');
       } catch (logError) {
-        console.warn('Failed to create action log, but renewal was successful:', logError);
+        console.warn('⚠️ Failed to create action log (non-critical):', logError);
       }
 
       toast({
-        title: "Success",
-        description: `Membership renewed successfully until ${newExpiry.toLocaleDateString()}`,
+        title: "Renewal Successful! ✅",
+        description: `${member.first_name} ${member.last_name}'s membership renewed until ${newExpiry.toLocaleDateString()}`,
       });
 
       onRenewalComplete();
       onClose();
     } catch (error) {
-      console.error('Error renewing membership:', error);
+      console.error('❌ Error renewing membership:', error);
       toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to renew membership",
+        title: "Renewal Failed",
+        description: error instanceof Error ? error.message : "Failed to renew membership. Please try again.",
         variant: "destructive",
       });
     } finally {
