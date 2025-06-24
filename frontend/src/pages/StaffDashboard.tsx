@@ -506,16 +506,19 @@ const StaffDashboard = () => {
   const handleAddPackage = async () => {
     if (!validatePackageForm() || !branchId) return;
 
-    // Check authentication before making request
-    if (!isAuthenticated()) {
-      toast({
-        title: "Authentication Required",
-        description: "Please log in again to continue",
-        variant: "destructive",
-      });
-      setShowAuthModal(true);
-      return;
-    }
+      // DEBUG: Check what auth headers we're getting
+      console.log('🔍 DEBUG: Checking authentication...');
+      console.log('Branch session:', localStorage.getItem('branch_session'));
+      console.log('Staff token:', localStorage.getItem('staff_session_token'));
+      
+      const headers = getAuthHeaders();
+      console.log('🔍 DEBUG: Generated headers:', headers);
+      
+      if (!headers.Authorization && !headers['X-Session-Token']) {
+        console.error('❌ NO AUTH HEADERS GENERATED!');
+        alert('Debug: No authentication headers! Check console.');
+        return;
+      }
 
     try {
       console.log('🔧 Adding package with auth headers...');
