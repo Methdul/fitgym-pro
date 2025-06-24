@@ -657,7 +657,7 @@ const AnalyticsTab = ({ branchId, branchName }: AnalyticsTabProps) => {
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
                   <FileText className="h-5 w-5" />
-                  Download Analytics Report
+                  Download Report
                 </DialogTitle>
               </DialogHeader>
               <div className="space-y-6">
@@ -674,22 +674,21 @@ const AnalyticsTab = ({ branchId, branchName }: AnalyticsTabProps) => {
                 <div className="text-center">
                   <p className="text-sm text-muted-foreground mb-4">Choose your preferred format:</p>
                   
-                  <div className="grid grid-cols-1 gap-3">
+                  <div className="grid grid-cols-1 gap-4 max-w-xs mx-auto">
                     <Button 
                       onClick={generatePDFReport}
                       disabled={downloadLoading}
-                      className="h-16 flex flex-col items-center justify-center gap-2 bg-red-600 hover:bg-red-700"
+                      className="h-16 flex flex-col items-center justify-center gap-1 bg-red-600 hover:bg-red-700 w-full"
                     >
                       {downloadLoading ? (
                         <>
-                          <RefreshCw className="h-5 w-5 animate-spin" />
-                          <span className="text-sm">Generating...</span>
+                          <RefreshCw className="h-4 w-4 animate-spin" />
+                          <span className="text-xs">Generating...</span>
                         </>
                       ) : (
                         <>
-                          <FileText className="h-5 w-5" />
-                          <span className="font-medium">Professional PDF Report</span>
-                          <span className="text-xs opacity-90">Formatted, printable document</span>
+                          <span className="font-semibold text-lg">PDF</span>
+                          <span className="text-xs opacity-90">Printable Report</span>
                         </>
                       )}
                     </Button>
@@ -698,30 +697,29 @@ const AnalyticsTab = ({ branchId, branchName }: AnalyticsTabProps) => {
                       onClick={generateCSVReport}
                       disabled={downloadLoading}
                       variant="outline"
-                      className="h-16 flex flex-col items-center justify-center gap-2"
+                      className="h-16 flex flex-col items-center justify-center gap-1 border-2 w-full"
                     >
                       {downloadLoading ? (
                         <>
-                          <RefreshCw className="h-5 w-5 animate-spin" />
-                          <span className="text-sm">Generating...</span>
+                          <RefreshCw className="h-4 w-4 animate-spin" />
+                          <span className="text-xs">Generating...</span>
                         </>
                       ) : (
                         <>
-                          <BarChart3 className="h-5 w-5" />
-                          <span className="font-medium">CSV Data Export</span>
-                          <span className="text-xs opacity-70">Raw data for analysis</span>
+                          <span className="font-semibold text-lg">CSV</span>
+                          <span className="text-xs opacity-70">Raw Data Export</span>
                         </>
                       )}
                     </Button>
                   </div>
                 </div>
 
-                <div className="flex gap-2 pt-2">
+                <div className="flex justify-center pt-2">
                   <Button 
-                    variant="outline" 
+                    variant="ghost" 
                     onClick={() => setShowDownloadModal(false)}
-                    className="flex-1"
                     disabled={downloadLoading}
+                    className="px-8"
                   >
                     Cancel
                   </Button>
