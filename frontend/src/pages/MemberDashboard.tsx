@@ -8,7 +8,7 @@ import MemberProfile from '@/components/member/MemberProfile';
 import MemberMembership from '@/components/member/MemberMembership';
 import { VerificationBanner } from '@/components/VerificationBanner';
 import { useToast } from '@/hooks/use-toast';
-import { db, auth } from '@/lib/supabase';
+import { db, auth, supabase } from '@/lib/supabase';
 import { Member } from '@/types';
 
 const MemberDashboard = () => {
@@ -63,6 +63,21 @@ const MemberDashboard = () => {
         }
       }
 
+      // Store user session for API calls if not already present
+      try {
+        const existingSession = localStorage.getItem('user_session');
+        if (!existingSession && user.session) {
+          localStorage.setItem('user_session', JSON.stringify({
+            access_token: user.session.access_token,
+            user_id: user.id,
+            email: user.email
+          }));
+          console.log('🔐 Stored user session for API calls');
+        }
+      } catch (sessionError) {
+        console.warn('⚠️ Could not store user session:', sessionError);
+      }
+
       // Fetch member data using the authenticated user's ID
       await fetchMemberData(user.id);
       
@@ -112,17 +127,65 @@ const MemberDashboard = () => {
     try {
       console.log('🔍 Fetching member data for user:', userId);
       
-      // Fetch member data from database using user ID
-      const { data: memberData, error: memberError } = await db.members.getByUserId(userId);
+      // First, try to get member by user ID using API
+      let { data: memberData, error: memberError } = await db.members.getByUserId(userId);
       
-      if (memberError) {
-        console.error('❌ Error fetching member data:', memberError);
-        throw new Error(`Failed to fetch member data: ${memberError.message || 'Unknown error'}`);
+      // If API fails, try direct Supabase query as fallback
+      if (memberError || !memberData) {
+        console.log('🔄 API lookup failed, trying direct Supabase query...');
+        
+        try {
+          // Try direct Supabase query by user_id
+          const { data: supabaseData, error: supabaseError } = await supabase
+            .from('members')
+            .select('*')
+            .eq('user_id', userId)
+            .single();
+            
+          if (!supabaseError && supabaseData) {
+            memberData = supabaseData;
+            console.log('✅ Found member via direct Supabase query (user_id)');
+          } else if (currentUser?.email) {
+            // Try by email if user_id lookup fails
+            const { data: emailData, error: emailError } = await supabase
+              .from('members')
+              .select('*')
+              .eq('email', currentUser.email)
+              .single();
+              
+            if (!emailError && emailData) {
+              memberData = emailData;
+              console.log('✅ Found member via direct Supabase query (email)');
+              
+              // Update the member record to link it with the current user
+              try {
+                await supabase
+                  .from('members')
+                  .update({ user_id: userId })
+                  .eq('id', emailData.id);
+                console.log('✅ Updated member record with user ID');
+              } catch (updateError) {
+                console.warn('⚠️ Could not update member record:', updateError);
+              }
+            }
+          }
+        } catch (directError) {
+          console.error('❌ Direct Supabase query also failed:', directError);
+        }
       }
-
+      
       if (!memberData) {
-        console.log('❌ No member record found for user:', userId);
-        setAuthError('No membership found for your account. Please contact support.');
+        console.log('❌ No member record found for user:', userId, 'or email:', currentUser?.email);
+        setAuthError(
+          `No membership found for your account (${currentUser?.email || 'Unknown email'}). 
+          
+          This could mean:
+          • Your membership hasn't been set up yet
+          • Your account needs to be linked to your membership
+          • There's a data synchronization issue
+          
+          Please contact support to resolve this issue.`
+        );
         setLoading(false);
         return;
       }
@@ -130,6 +193,7 @@ const MemberDashboard = () => {
       console.log('✅ Member data fetched successfully:', {
         id: memberData.id,
         name: `${memberData.first_name} ${memberData.last_name}`,
+        email: memberData.email,
         status: memberData.status,
         package: memberData.package_name
       });
@@ -261,13 +325,19 @@ const MemberDashboard = () => {
               {authError.includes('log in') || authError.includes('Authentication') ? (
                 <Shield className="h-10 w-10 text-red-400" />
               ) : (
-                <AlertTriangle className="h-10 w-10 text-red-400" />
+                <User className="h-10 w-10 text-orange-400" />
               )}
             </div>
             <h2 className="text-3xl font-bold mb-4">
-              {authError.includes('log in') || authError.includes('Authentication') ? 'Authentication Required' : 'Access Issue'}
+              {authError.includes('log in') || authError.includes('Authentication') ? 'Authentication Required' : 'Membership Setup Needed'}
             </h2>
-            <p className="text-gray-300 mb-8 max-w-2xl mx-auto">{authError}</p>
+            <div className="text-gray-300 mb-8 max-w-2xl mx-auto space-y-3">
+              {authError.split('\n').map((line, index) => (
+                <p key={index} className={index === 0 ? 'text-lg' : 'text-sm'}>
+                  {line.trim()}
+                </p>
+              ))}
+            </div>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Button size="lg" onClick={refreshData} className="transform hover:scale-105 transition-all duration-300">
                 <RefreshCw className="h-5 w-5 mr-2" />
@@ -281,12 +351,31 @@ const MemberDashboard = () => {
                   </a>
                 </Button>
               ) : (
-                <Button size="lg" variant="outline" onClick={handleSignOut} className="transform hover:scale-105 transition-all duration-300 text-white border-white hover:bg-white hover:text-gray-900">
-                  <LogOut className="h-5 w-5 mr-2" />
-                  Sign Out
-                </Button>
+                <>
+                  <Button size="lg" variant="outline" onClick={handleSignOut} className="transform hover:scale-105 transition-all duration-300 text-white border-white hover:bg-white hover:text-gray-900">
+                    <LogOut className="h-5 w-5 mr-2" />
+                    Sign Out
+                  </Button>
+                  <Button size="lg" variant="outline" asChild className="transform hover:scale-105 transition-all duration-300 text-white border-white hover:bg-white hover:text-gray-900">
+                    <a href="/contact">
+                      <User className="h-5 w-5 mr-2" />
+                      Contact Support
+                    </a>
+                  </Button>
+                </>
               )}
             </div>
+            
+            {currentUser?.email && !authError.includes('Authentication') && (
+              <div className="mt-8 p-4 bg-white/10 rounded-lg backdrop-blur-sm">
+                <p className="text-sm text-gray-300">
+                  <strong>Logged in as:</strong> {currentUser.email}
+                </p>
+                <p className="text-xs text-gray-400 mt-1">
+                  If this email should have a membership, please contact support with this information.
+                </p>
+              </div>
+            )}
           </div>
         </section>
       </div>
