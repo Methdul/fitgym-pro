@@ -30,7 +30,8 @@ import {
   Eye,
   EyeOff,
   Lock,
-  Mail
+  Mail,
+  RefreshCw
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { db, supabase } from '@/lib/supabase';
@@ -48,6 +49,18 @@ interface Branch {
   branch_email?: string | null;
   branch_password_hash?: string | null;
   is_active: boolean;
+  created_at: string;
+}
+
+interface Member {
+  id: string;
+  branch_id: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone?: string;
+  membership_status?: string;
+  status?: string;
   created_at: string;
 }
 
@@ -71,8 +84,15 @@ interface GymStaff {
   is_displayed: boolean;
 }
 
+interface BranchWithRealCounts extends Branch {
+  real_member_count: number;
+  real_staff_count: number;
+}
+
 const AdminDashboard = () => {
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [branchesWithCounts, setBranchesWithCounts] = useState<BranchWithRealCounts[]>([]);
+  const [allMembers, setAllMembers] = useState<Member[]>([]);
   const [partnerships, setPartnerships] = useState<Partnership[]>([]);
   const [gymStaff, setGymStaff] = useState<GymStaff[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,7 +115,7 @@ const AdminDashboard = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  // UPDATED branch form with credentials
+  // Branch form with credentials
   const [branchForm, setBranchForm] = useState({
     name: '',
     address: '',
@@ -103,7 +123,6 @@ const AdminDashboard = () => {
     email: '',
     hours: '6:00 AM - 10:00 PM',
     facilities: [] as string[],
-    // ADD these new fields:
     branch_email: '',
     branch_password: '',
     confirm_password: ''
@@ -135,56 +154,118 @@ const AdminDashboard = () => {
     fetchAllData();
   }, []);
 
-  // ADDED: Debug effect to track branch changes
-  useEffect(() => {
-    if (process.env.NODE_ENV === 'development' && branches.length > 0) {
-      console.log('🔄 Branches state updated:');
-      branches.forEach((branch, index) => {
-        console.log(`  ${index + 1}. ${branch.name} -> ${branch.branch_email || 'No email'} (ID: ${branch.id.slice(-8)})`);
+  // Calculate real member and staff counts
+  const calculateRealCounts = async (branchesData: Branch[]) => {
+    console.log('🔄 Calculating real member and staff counts...');
+    
+    try {
+      // Fetch all members with error handling
+      const { data: membersData, error: membersError } = await db.members.getAll();
+      if (membersError) {
+        console.error('Error fetching members:', membersError);
+        // Fallback to stored counts
+        return branchesData.map(branch => ({
+          ...branch,
+          real_member_count: branch.member_count || 0,
+          real_staff_count: branch.staff_count || 0
+        }));
+      }
+
+      // Fetch all staff with error handling
+      const { data: staffData, error: staffError } = await db.staff.getAll();
+      if (staffError) {
+        console.error('Error fetching staff:', staffError);
+      }
+
+      const members = membersData || [];
+      const staff = staffData || [];
+
+      console.log('📊 Found data:', {
+        totalMembers: members.length,
+        totalStaff: staff.length,
+        branches: branchesData.length
       });
+
+      setAllMembers(members);
+
+      // Calculate counts per branch
+      const branchesWithRealCounts = branchesData.map(branch => {
+        // Count active members for this branch
+        // Handle different possible field names and statuses
+        const branchMembers = members.filter(member => {
+          const matchesBranch = member.branch_id === branch.id;
+          const isActive = member.membership_status === 'active' || 
+                          member.membership_status === 'Active' ||
+                          member.status === 'active' ||
+                          member.status === 'Active' ||
+                          !member.membership_status; // If no status field, assume active
+          return matchesBranch && isActive;
+        });
+        
+        // Count staff for this branch
+        const branchStaff = staff.filter(staffMember => 
+          staffMember.branch_id === branch.id
+        );
+
+        const realMemberCount = branchMembers.length;
+        const realStaffCount = branchStaff.length;
+
+        console.log(`🏢 ${branch.name}: ${realMemberCount} members, ${realStaffCount} staff`);
+
+        return {
+          ...branch,
+          real_member_count: realMemberCount,
+          real_staff_count: realStaffCount
+        };
+      });
+
+      return branchesWithRealCounts;
+    } catch (error) {
+      console.error('Error calculating real counts:', error);
+      // Fallback to stored counts
+      return branchesData.map(branch => ({
+        ...branch,
+        real_member_count: branch.member_count || 0,
+        real_staff_count: branch.staff_count || 0
+      }));
     }
-  }, [branches]);
+  };
 
   const fetchAllData = async () => {
     setLoading(true);
     try {
-      console.log('🔄 Fetching all data...');
+      console.log('🔄 Fetching all admin dashboard data...');
       
-      // FIXED: Force fresh data fetch by adding timestamp
-      const timestamp = Date.now();
       const [branchesData, partnershipsData, staffData] = await Promise.all([
         supabase.from('branches').select('*').order('id'),
         db.partnerships.getAll(),
         db.gymStaff.getDisplayed()
       ]);
 
-      console.log('📊 Raw branches data:', branchesData.data);
+      console.log('📊 Raw branches data:', branchesData.data?.length || 0);
 
       if (branchesData.error) {
         throw branchesData.error;
       }
 
-      // FIXED: Use stable multi-level sorting to prevent shuffling
       const sortedBranches = (branchesData.data || []).sort((a, b) => {
-        // Primary sort: by ID (most stable)
         if (a.id < b.id) return -1;
         if (a.id > b.id) return 1;
-        
-        // Secondary sort: by created_at if IDs are somehow equal
         return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
       });
 
-      console.log('📋 Sorted branches with emails:', sortedBranches.map(b => ({
-        id: b.id.slice(-8),
-        name: b.name,
-        branch_email: b.branch_email
-      })));
-
       setBranches(sortedBranches);
+
+      // Calculate real member and staff counts
+      const branchesWithRealCounts = await calculateRealCounts(sortedBranches);
+      setBranchesWithCounts(branchesWithRealCounts);
+
       setPartnerships(partnershipsData.data || []);
       setGymStaff(staffData.data || []);
+
+      console.log('✅ Admin dashboard data loaded successfully');
     } catch (error) {
-      console.error('Error fetching data:', error);
+      console.error('❌ Error fetching admin data:', error);
       toast({
         title: "Error",
         description: "Failed to load dashboard data",
@@ -194,6 +275,11 @@ const AdminDashboard = () => {
       setLoading(false);
     }
   };
+
+  // Calculate totals from real data
+  const totalMembers = branchesWithCounts.reduce((sum, branch) => sum + (branch.real_member_count || 0), 0);
+  const totalStaff = branchesWithCounts.reduce((sum, branch) => sum + (branch.real_staff_count || 0), 0);
+  const activePartnerships = partnerships.filter(p => p.is_active).length;
 
   const resetBranchForm = () => {
     setBranchForm({
@@ -295,7 +381,6 @@ const AdminDashboard = () => {
       let result;
       
       if (branchForm.branch_email && branchForm.branch_password) {
-        // Use create_branch_with_credentials function
         const { data, error } = await supabase.rpc('create_branch_with_credentials', {
           p_name: branchForm.name,
           p_address: branchForm.address,
@@ -310,7 +395,6 @@ const AdminDashboard = () => {
         if (error) throw error;
         result = data;
       } else {
-        // Use regular branch creation
         const newBranch = {
           ...branchForm,
           facilities: branchForm.facilities.length > 0 ? branchForm.facilities : ['Cardio Area', 'Weight Training']
@@ -329,7 +413,6 @@ const AdminDashboard = () => {
       resetBranchForm();
       setIsAddBranchOpen(false);
       
-      // FIXED: Force data refresh with delay to ensure consistency
       setTimeout(() => {
         fetchAllData();
       }, 500);
@@ -373,12 +456,10 @@ const AdminDashboard = () => {
         facilities: branchForm.facilities
       };
 
-      // If branch email/password provided, update credentials
       if (branchForm.branch_email) {
         updateData.branch_email = branchForm.branch_email;
         
         if (branchForm.branch_password) {
-          // Hash password on server side via function call
           const { data, error } = await supabase.rpc('add_branch_credentials', {
             p_branch_id: selectedBranch.id,
             p_branch_email: branchForm.branch_email,
@@ -401,7 +482,6 @@ const AdminDashboard = () => {
       setSelectedBranch(null);
       setIsEditBranchOpen(false);
       
-      // FIXED: Force data refresh with delay to ensure consistency
       setTimeout(() => {
         fetchAllData();
       }, 500);
@@ -436,7 +516,6 @@ const AdminDashboard = () => {
       setSelectedBranch(null);
       setIsAddCredentialsOpen(false);
       
-      // FIXED: Force data refresh with delay to ensure consistency
       setTimeout(() => {
         fetchAllData();
       }, 500);
@@ -476,7 +555,6 @@ const AdminDashboard = () => {
       setDeleteConfirmText('');
       setIsDeleteBranchOpen(false);
       
-      // FIXED: Force data refresh with delay to ensure consistency
       setTimeout(() => {
         fetchAllData();
       }, 500);
@@ -599,7 +677,10 @@ const AdminDashboard = () => {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Loading admin dashboard...</p>
+        </div>
       </div>
     );
   }
@@ -616,66 +697,71 @@ const AdminDashboard = () => {
             </h1>
             <p className="text-muted-foreground">Manage your gym system</p>
           </div>
-          <Badge variant="outline" className="px-4 py-2">
-            <Shield className="h-4 w-4 mr-2" />
-            Admin Panel
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={fetchAllData} disabled={loading} size="sm">
+              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Refresh Data
+            </Button>
+            <Badge variant="outline" className="px-4 py-2">
+              <Shield className="h-4 w-4 mr-2" />
+              Admin Panel
+            </Badge>
+          </div>
         </div>
 
-        {/* Overview Cards */}
+        {/* Overview Cards with Real Data */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <Card>
+          <Card className="relative">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Branches</CardTitle>
               <Building2 className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{branches.length}</div>
+              <div className="text-2xl font-bold">{branchesWithCounts.length}</div>
               <p className="text-xs text-muted-foreground">
                 Active gym locations
               </p>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="relative">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Members</CardTitle>
               <Users className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
-                {branches.reduce((sum, branch) => sum + branch.member_count, 0)}
-              </div>
+              <div className="text-2xl font-bold text-green-600">{totalMembers.toLocaleString()}</div>
               <p className="text-xs text-muted-foreground">
-                Across all branches
+                Active across all branches
               </p>
+              {allMembers.length > 0 && (
+                <p className="text-xs text-green-600 mt-1">
+                  ✓ Real-time count from database
+                </p>
+              )}
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="relative">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Staff</CardTitle>
               <UserPlus className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
-                {branches.reduce((sum, branch) => sum + branch.staff_count, 0)}
-              </div>
+              <div className="text-2xl font-bold text-blue-600">{totalStaff}</div>
               <p className="text-xs text-muted-foreground">
                 Branch staff members
               </p>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="relative">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Partnerships</CardTitle>
               <Heart className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
-                {partnerships.filter(p => p.is_active).length}
-              </div>
+              <div className="text-2xl font-bold">{activePartnerships}</div>
               <p className="text-xs text-muted-foreground">
                 Active business partnerships
               </p>
@@ -692,81 +778,86 @@ const AdminDashboard = () => {
             <TabsTrigger value="staff">Staff</TabsTrigger>
           </TabsList>
 
-          {/* Overview Tab */}
+          {/* Overview Tab with Real Statistics */}
           <TabsContent value="overview" className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <Card>
                 <CardHeader>
-                  <CardTitle>System Statistics</CardTitle>
-                  <CardDescription>Overall system performance</CardDescription>
+                  <CardTitle>Real-Time Statistics</CardTitle>
+                  <CardDescription>Live data from your gym system</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">Total Revenue</span>
-                    <span className="text-2xl font-bold text-green-600">$24,850</span>
+                    <span className="text-sm font-medium">Total Members</span>
+                    <span className="text-2xl font-bold text-green-600">{totalMembers.toLocaleString()}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">Active Memberships</span>
-                    <span className="text-2xl font-bold">
-                      {branches.reduce((sum, branch) => sum + branch.member_count, 0)}
+                    <span className="text-sm font-medium">Total Staff</span>
+                    <span className="text-2xl font-bold text-blue-600">{totalStaff}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">Active Branches</span>
+                    <span className="text-2xl font-bold">{branchesWithCounts.length}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">Avg Members/Branch</span>
+                    <span className="text-2xl font-bold text-purple-600">
+                      {branchesWithCounts.length > 0 ? Math.round(totalMembers / branchesWithCounts.length) : 0}
                     </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">Monthly Growth</span>
-                    <span className="text-2xl font-bold text-blue-600">+12.5%</span>
                   </div>
                 </CardContent>
               </Card>
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Quick Actions</CardTitle>
-                  <CardDescription>Common administrative tasks</CardDescription>
+                  <CardTitle>Branch Performance</CardTitle>
+                  <CardDescription>Top performing branches by membership</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <Button className="w-full justify-start" variant="outline" onClick={() => setActiveTab('branches')}>
-                    <Building2 className="h-4 w-4 mr-2" />
-                    Manage Branches
-                  </Button>
-                  <Button className="w-full justify-start" variant="outline" onClick={() => setActiveTab('partnerships')}>
-                    <Heart className="h-4 w-4 mr-2" />
-                    Manage Partnerships
-                  </Button>
-                  <Button className="w-full justify-start" variant="outline" onClick={() => setActiveTab('staff')}>
-                    <UserPlus className="h-4 w-4 mr-2" />
-                    Manage Staff
-                  </Button>
+                  {branchesWithCounts
+                    .sort((a, b) => b.real_member_count - a.real_member_count)
+                    .slice(0, 5)
+                    .map((branch, index) => (
+                      <div key={branch.id} className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="w-6 h-6 p-0 flex items-center justify-center text-xs">
+                            {index + 1}
+                          </Badge>
+                          <span className="text-sm font-medium">{branch.name}</span>
+                        </div>
+                        <span className="text-sm font-bold text-green-600">
+                          {branch.real_member_count} members
+                        </span>
+                      </div>
+                    ))}
                 </CardContent>
               </Card>
             </div>
 
-            {/* Packages Note */}
             <Card className="border-blue-500/20 bg-blue-500/5">
               <CardContent className="p-4">
                 <div className="flex items-center gap-2">
-                  <Building2 className="h-4 w-4 text-blue-500" />
+                  <Activity className="h-4 w-4 text-blue-500" />
                   <span className="text-sm font-medium text-blue-700">
-                    Package Management
+                    Data Accuracy
                   </span>
                 </div>
                 <p className="text-sm text-blue-600 mt-1">
-                  Packages are now managed at the branch level. Each branch can create and manage their own membership packages through their Staff Dashboard.
+                  All member and staff counts are calculated in real-time from the database for maximum accuracy.
                 </p>
               </CardContent>
             </Card>
           </TabsContent>
 
-          {/* Branches Tab */}
+          {/* Branches Tab with Real Member Counts */}
           <TabsContent value="branches" className="space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-2xl font-bold">Branch Management</h2>
               <div className="flex gap-2">
-                {/* ADDED: Refresh button for debugging */}
-                {process.env.NODE_ENV === 'development' && (
-                  <Button variant="outline" onClick={fetchAllData} disabled={loading}>
-                    🔄 Refresh Data
-                  </Button>
-                )}
+                <Button variant="outline" onClick={fetchAllData} disabled={loading}>
+                  <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                  Refresh Counts
+                </Button>
                 <Dialog open={isAddBranchOpen} onOpenChange={setIsAddBranchOpen}>
                   <DialogTrigger asChild>
                     <Button>
@@ -774,159 +865,155 @@ const AdminDashboard = () => {
                       Add Branch
                     </Button>
                   </DialogTrigger>
-                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-                  <DialogHeader>
-                    <DialogTitle>Add New Branch</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-4">
-                    {/* Basic Information */}
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <Label htmlFor="branchName">Branch Name *</Label>
-                        <Input
-                          id="branchName"
-                          value={branchForm.name}
-                          onChange={(e) => setBranchForm(prev => ({ ...prev, name: e.target.value }))}
-                          placeholder="Downtown Branch"
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="branchPhone">Phone *</Label>
-                        <Input
-                          id="branchPhone"
-                          value={branchForm.phone}
-                          onChange={(e) => setBranchForm(prev => ({ ...prev, phone: e.target.value }))}
-                          placeholder="+1 (555) 123-4567"
-                        />
-                      </div>
-                    </div>
-                    
-                    <div>
-                      <Label htmlFor="branchAddress">Address *</Label>
-                      <Textarea
-                        id="branchAddress"
-                        value={branchForm.address}
-                        onChange={(e) => setBranchForm(prev => ({ ...prev, address: e.target.value }))}
-                        placeholder="123 Main St, City, State"
-                      />
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <Label htmlFor="branchEmail">Contact Email *</Label>
-                        <Input
-                          id="branchEmail"
-                          value={branchForm.email}
-                          onChange={(e) => setBranchForm(prev => ({ ...prev, email: e.target.value }))}
-                          placeholder="contact@branch.com"
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="branchHours">Operating Hours</Label>
-                        <Input
-                          id="branchHours"
-                          value={branchForm.hours}
-                          onChange={(e) => setBranchForm(prev => ({ ...prev, hours: e.target.value }))}
-                          placeholder="6:00 AM - 10:00 PM"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Staff Login Credentials Section */}
-                    <div className="border-t pt-4">
-                      <div className="flex items-center gap-2 mb-3">
-                        <Lock className="h-4 w-4" />
-                        <Label className="text-sm font-medium">Staff Login Credentials (Optional)</Label>
-                      </div>
-                      <p className="text-sm text-muted-foreground mb-4">
-                        Create email/password for staff to access this branch dashboard
-                      </p>
-                      
-                      <div className="space-y-4">
+                  <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                    <DialogHeader>
+                      <DialogTitle>Add New Branch</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      {/* Basic Information */}
+                      <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <Label htmlFor="branchStaffEmail">Staff Login Email</Label>
+                          <Label htmlFor="branchName">Branch Name *</Label>
                           <Input
-                            id="branchStaffEmail"
-                            type="email"
-                            value={branchForm.branch_email}
-                            onChange={(e) => setBranchForm(prev => ({ ...prev, branch_email: e.target.value }))}
-                            placeholder="staff@downtown.fitgym.com"
+                            id="branchName"
+                            value={branchForm.name}
+                            onChange={(e) => setBranchForm(prev => ({ ...prev, name: e.target.value }))}
+                            placeholder="Downtown Branch"
                           />
                         </div>
+                        <div>
+                          <Label htmlFor="branchPhone">Phone *</Label>
+                          <Input
+                            id="branchPhone"
+                            value={branchForm.phone}
+                            onChange={(e) => setBranchForm(prev => ({ ...prev, phone: e.target.value }))}
+                            placeholder="+1 (555) 123-4567"
+                          />
+                        </div>
+                      </div>
+                      
+                      <div>
+                        <Label htmlFor="branchAddress">Address *</Label>
+                        <Textarea
+                          id="branchAddress"
+                          value={branchForm.address}
+                          onChange={(e) => setBranchForm(prev => ({ ...prev, address: e.target.value }))}
+                          placeholder="123 Main St, City, State"
+                        />
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label htmlFor="branchEmail">Contact Email *</Label>
+                          <Input
+                            id="branchEmail"
+                            value={branchForm.email}
+                            onChange={(e) => setBranchForm(prev => ({ ...prev, email: e.target.value }))}
+                            placeholder="contact@branch.com"
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="branchHours">Operating Hours</Label>
+                          <Input
+                            id="branchHours"
+                            value={branchForm.hours}
+                            onChange={(e) => setBranchForm(prev => ({ ...prev, hours: e.target.value }))}
+                            placeholder="6:00 AM - 10:00 PM"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Staff Login Credentials Section */}
+                      <div className="border-t pt-4">
+                        <div className="flex items-center gap-2 mb-3">
+                          <Lock className="h-4 w-4" />
+                          <Label className="text-sm font-medium">Staff Login Credentials (Optional)</Label>
+                        </div>
+                        <p className="text-sm text-muted-foreground mb-4">
+                          Create email/password for staff to access this branch dashboard
+                        </p>
                         
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-4">
                           <div>
-                            <Label htmlFor="branchStaffPassword">Staff Password</Label>
-                            <div className="relative">
-                              <Input
-                                id="branchStaffPassword"
-                                type={showPassword ? "text" : "password"}
-                                value={branchForm.branch_password}
-                                onChange={(e) => setBranchForm(prev => ({ ...prev, branch_password: e.target.value }))}
-                                placeholder="Min. 6 characters"
-                              />
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="absolute right-0 top-0 h-full px-3"
-                                onClick={() => setShowPassword(!showPassword)}
-                              >
-                                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                              </Button>
-                            </div>
+                            <Label htmlFor="branchStaffEmail">Staff Login Email</Label>
+                            <Input
+                              id="branchStaffEmail"
+                              type="email"
+                              value={branchForm.branch_email}
+                              onChange={(e) => setBranchForm(prev => ({ ...prev, branch_email: e.target.value }))}
+                              placeholder="staff@downtown.fitgym.com"
+                            />
                           </div>
                           
-                          <div>
-                            <Label htmlFor="branchConfirmPassword">Confirm Password</Label>
-                            <div className="relative">
-                              <Input
-                                id="branchConfirmPassword"
-                                type={showConfirmPassword ? "text" : "password"}
-                                value={branchForm.confirm_password}
-                                onChange={(e) => setBranchForm(prev => ({ ...prev, confirm_password: e.target.value }))}
-                                placeholder="Confirm password"
-                              />
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="absolute right-0 top-0 h-full px-3"
-                                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                              >
-                                {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                              </Button>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <Label htmlFor="branchStaffPassword">Staff Password</Label>
+                              <div className="relative">
+                                <Input
+                                  id="branchStaffPassword"
+                                  type={showPassword ? "text" : "password"}
+                                  value={branchForm.branch_password}
+                                  onChange={(e) => setBranchForm(prev => ({ ...prev, branch_password: e.target.value }))}
+                                  placeholder="Min. 6 characters"
+                                />
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="absolute right-0 top-0 h-full px-3"
+                                  onClick={() => setShowPassword(!showPassword)}
+                                >
+                                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </Button>
+                              </div>
+                            </div>
+                            
+                            <div>
+                              <Label htmlFor="branchConfirmPassword">Confirm Password</Label>
+                              <div className="relative">
+                                <Input
+                                  id="branchConfirmPassword"
+                                  type={showConfirmPassword ? "text" : "password"}
+                                  value={branchForm.confirm_password}
+                                  onChange={(e) => setBranchForm(prev => ({ ...prev, confirm_password: e.target.value }))}
+                                  placeholder="Confirm password"
+                                />
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="absolute right-0 top-0 h-full px-3"
+                                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                                >
+                                  {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </Button>
+                              </div>
                             </div>
                           </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="flex justify-end gap-2">
-                      <Button variant="outline" onClick={() => {
-                        setIsAddBranchOpen(false);
-                        resetBranchForm();
-                      }}>
-                        Cancel
-                      </Button>
-                      <Button onClick={handleAddBranch} disabled={!branchForm.name || !branchForm.address}>
-                        Add Branch
-                      </Button>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="outline" onClick={() => {
+                          setIsAddBranchOpen(false);
+                          resetBranchForm();
+                        }}>
+                          Cancel
+                        </Button>
+                        <Button onClick={handleAddBranch} disabled={!branchForm.name || !branchForm.address}>
+                          Add Branch
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            </div>
+                  </DialogContent>
+                </Dialog>
+              </div>
             </div>
 
-            {/* FIXED: Branch Cards with Forced Re-render */}
+            {/* Branch Cards with Real Member Counts */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {branches.map((branch, index) => {
-                // Force unique rendering by including email in key
+              {branchesWithCounts.map((branch, index) => {
                 const uniqueKey = `branch-${branch.id}-${branch.branch_email || 'no-email'}-${index}`;
-                
-                // Debug logging directly in render
-                console.log(`🎯 RENDERING: ${branch.name} -> ${branch.branch_email} (Key: ${uniqueKey})`);
                 
                 return (
                   <Card key={uniqueKey} className="relative">
@@ -939,7 +1026,7 @@ const AdminDashboard = () => {
                               variant="ghost" 
                               size="sm"
                               onClick={() => {
-                                setSelectedBranch(branch);
+                                setSelectedBranch(branches.find(b => b.id === branch.id) || null);
                                 setIsAddCredentialsOpen(true);
                               }}
                               title="Add Staff Credentials"
@@ -951,7 +1038,7 @@ const AdminDashboard = () => {
                             variant="ghost" 
                             size="sm"
                             onClick={() => {
-                              setSelectedBranch(branch);
+                              setSelectedBranch(branches.find(b => b.id === branch.id) || null);
                               handleEditBranch();
                             }}
                           >
@@ -961,7 +1048,7 @@ const AdminDashboard = () => {
                             variant="ghost" 
                             size="sm" 
                             onClick={() => {
-                              setSelectedBranch(branch);
+                              setSelectedBranch(branches.find(b => b.id === branch.id) || null);
                               setIsDeleteBranchOpen(true);
                             }}
                             className="text-red-500 hover:text-red-700"
@@ -975,18 +1062,21 @@ const AdminDashboard = () => {
                     <CardContent className="space-y-3">
                       <div className="flex justify-between text-sm">
                         <span>Members:</span>
-                        <span className="font-semibold">{branch.member_count}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-green-600">{branch.real_member_count}</span>
+                          <Badge variant="outline" className="text-xs">Real-time</Badge>
+                        </div>
                       </div>
                       <div className="flex justify-between text-sm">
                         <span>Staff:</span>
-                        <span className="font-semibold">{branch.staff_count}</span>
+                        <span className="font-semibold text-blue-600">{branch.real_staff_count}</span>
                       </div>
                       <div className="text-sm">
                         <span className="text-muted-foreground">Hours:</span>
                         <div className="text-xs">{branch.hours}</div>
                       </div>
                       
-                      {/* FIXED: Force Fresh Email Display with Debug Info */}
+                      {/* Staff Login Status */}
                       <div className="border-t pt-2 space-y-2">
                         <div className="flex items-center justify-between text-sm">
                           <span className="flex items-center gap-1">
@@ -1002,20 +1092,13 @@ const AdminDashboard = () => {
                           </Badge>
                         </div>
                         
-                        {/* FIXED: Display email with branch identification */}
                         {branch.branch_email ? (
-                          <div className="space-y-1">
-                            {/* Main email display */}
-                            <div className="flex items-center gap-1 text-xs bg-green-50 dark:bg-green-900/20 p-2 rounded border-l-2 border-green-500">
+                          <div className="text-xs bg-green-50 dark:bg-green-900/20 p-2 rounded border-l-2 border-green-500">
+                            <div className="flex items-center gap-1">
                               <Mail className="h-3 w-3 text-green-600 flex-shrink-0" />
                               <span className="text-green-700 dark:text-green-300 font-mono text-[11px] break-all">
                                 {branch.branch_email}
                               </span>
-                            </div>
-                            
-                            {/* Debug verification */}
-                            <div className="text-[8px] text-gray-500 font-mono bg-gray-100 dark:bg-gray-800 p-1 rounded">
-                              Branch: {branch.name} | ID: {branch.id.slice(-8)}
                             </div>
                           </div>
                         ) : (
@@ -1044,7 +1127,7 @@ const AdminDashboard = () => {
             </div>
           </TabsContent>
 
-          {/* Partnerships Tab */}
+          {/* Partnerships Tab - Keep existing implementation */}
           <TabsContent value="partnerships" className="space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-2xl font-bold">Partnership Management</h2>
@@ -1161,7 +1244,7 @@ const AdminDashboard = () => {
             </div>
           </TabsContent>
 
-          {/* Staff Tab */}
+          {/* Staff Tab - Keep existing implementation */}
           <TabsContent value="staff" className="space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-2xl font-bold">Staff Management</h2>
@@ -1271,6 +1354,7 @@ const AdminDashboard = () => {
           </TabsContent>
         </Tabs>
 
+        {/* Keep all existing dialogs (Edit Branch, Add Credentials, Delete Branch) */}
         {/* Edit Branch Dialog */}
         <Dialog open={isEditBranchOpen} onOpenChange={setIsEditBranchOpen}>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
