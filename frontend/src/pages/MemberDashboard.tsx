@@ -24,15 +24,24 @@ const MemberDashboard = () => {
   const { toast } = useToast();
 
   // Mock member ID - in real app, this would come from authentication
-  const mockMemberId = 'mock-member-id';
+  // Using proper UUID format to avoid database errors
+  const mockMemberId = '550e8400-e29b-41d4-a716-446655440000';
+
+  // TODO: Replace mock data with real authentication
+  // When implementing real auth, replace mockMemberId with actual user ID from auth context
 
   useEffect(() => {
+    console.log('🔄 Initializing member dashboard with mock data');
     fetchMemberData();
     
     // Get verification status from localStorage
     const status = localStorage.getItem('user_verification_status');
     if (status) {
-      setVerificationStatus(JSON.parse(status));
+      try {
+        setVerificationStatus(JSON.parse(status));
+      } catch (error) {
+        console.error('Error parsing verification status:', error);
+      }
     }
   }, []);
 
@@ -74,10 +83,11 @@ const MemberDashboard = () => {
   const fetchMemberData = async () => {
     try {
       // Mock member data since we don't have real authentication yet
+      // Using proper UUID format for database compatibility
       const mockMember: Member = {
         id: mockMemberId,
         branch_id: '550e8400-e29b-41d4-a716-446655440001',
-        user_id: 'mock-user-id',
+        user_id: '550e8400-e29b-41d4-a716-446655440002',
         first_name: 'John',
         last_name: 'Doe',
         email: 'john.doe@email.com',
@@ -94,6 +104,7 @@ const MemberDashboard = () => {
         updated_at: '2024-01-01T00:00:00Z'
       };
 
+      console.log('🎭 Using mock member data with UUID:', mockMemberId);
       setMember(mockMember);
     } catch (error) {
       console.error('Error fetching member data:', error);
@@ -523,7 +534,7 @@ const MemberDashboard = () => {
       </div>
 
       {/* Custom CSS for animations */}
-      <style jsx>{`
+      <style>{`
         @keyframes fade-in {
           from { opacity: 0; transform: translateY(30px); }
           to { opacity: 1; transform: translateY(0); }
