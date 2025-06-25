@@ -3,12 +3,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { User, CreditCard, Calendar, Settings, AlertTriangle, Shield, Activity, TrendingUp, Clock, Star, ChevronRight, RefreshCw } from 'lucide-react';
+import { User, CreditCard, Calendar, Settings, AlertTriangle, Shield, Activity, TrendingUp, Clock, Star, ChevronRight, RefreshCw, LogOut } from 'lucide-react';
 import MemberProfile from '@/components/member/MemberProfile';
 import MemberMembership from '@/components/member/MemberMembership';
 import { VerificationBanner } from '@/components/VerificationBanner';
 import { useToast } from '@/hooks/use-toast';
-import { db } from '@/lib/supabase';
+import { db, auth } from '@/lib/supabase';
 import { Member } from '@/types';
 
 const MemberDashboard = () => {
@@ -16,6 +16,8 @@ const MemberDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const [verificationStatus, setVerificationStatus] = useState<any>(null);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [authError, setAuthError] = useState<string>('');
   const [animatedStats, setAnimatedStats] = useState({
     daysRemaining: 0,
     price: 0,
@@ -23,27 +25,53 @@ const MemberDashboard = () => {
   });
   const { toast } = useToast();
 
-  // Mock member ID - in real app, this would come from authentication
-  // Using proper UUID format to avoid database errors
-  const mockMemberId = '550e8400-e29b-41d4-a716-446655440000';
-
-  // TODO: Replace mock data with real authentication
-  // When implementing real auth, replace mockMemberId with actual user ID from auth context
-
   useEffect(() => {
-    console.log('🔄 Initializing member dashboard with mock data');
-    fetchMemberData();
-    
-    // Get verification status from localStorage
-    const status = localStorage.getItem('user_verification_status');
-    if (status) {
-      try {
-        setVerificationStatus(JSON.parse(status));
-      } catch (error) {
-        console.error('Error parsing verification status:', error);
-      }
-    }
+    console.log('🔄 Initializing member dashboard...');
+    initializeDashboard();
   }, []);
+
+  const initializeDashboard = async () => {
+    try {
+      // First, get the current authenticated user
+      console.log('🔐 Getting current user...');
+      const { user, error: userError } = await auth.getCurrentUser();
+      
+      if (userError) {
+        console.error('❌ Authentication error:', userError);
+        setAuthError('Authentication failed. Please log in again.');
+        setLoading(false);
+        return;
+      }
+
+      if (!user) {
+        console.log('❌ No authenticated user found');
+        setAuthError('Please log in to access your dashboard.');
+        setLoading(false);
+        return;
+      }
+
+      console.log('✅ Authenticated user found:', user.id);
+      setCurrentUser(user);
+
+      // Get verification status from localStorage
+      const status = localStorage.getItem('user_verification_status');
+      if (status) {
+        try {
+          setVerificationStatus(JSON.parse(status));
+        } catch (error) {
+          console.error('Error parsing verification status:', error);
+        }
+      }
+
+      // Fetch member data using the authenticated user's ID
+      await fetchMemberData(user.id);
+      
+    } catch (error) {
+      console.error('❌ Dashboard initialization error:', error);
+      setAuthError('Failed to initialize dashboard. Please try again.');
+      setLoading(false);
+    }
+  };
 
   // Animate stats when member data loads
   useEffect(() => {
@@ -80,42 +108,88 @@ const MemberDashboard = () => {
     }
   }, [member]);
 
-  const fetchMemberData = async () => {
+  const fetchMemberData = async (userId: string) => {
     try {
-      // Mock member data since we don't have real authentication yet
-      // Using proper UUID format for database compatibility
-      const mockMember: Member = {
-        id: mockMemberId,
-        branch_id: '550e8400-e29b-41d4-a716-446655440001',
-        user_id: '550e8400-e29b-41d4-a716-446655440002',
-        first_name: 'John',
-        last_name: 'Doe',
-        email: 'john.doe@email.com',
-        phone: '+1 (555) 123-4567',
-        national_id: '123456789',
-        status: 'active',
-        package_type: 'individual',
-        package_name: 'Premium Monthly',
-        package_price: 79.99,
-        start_date: '2024-01-01',
-        expiry_date: '2024-12-31',
-        is_verified: true,
-        created_at: '2024-01-01T00:00:00Z',
-        updated_at: '2024-01-01T00:00:00Z'
-      };
+      console.log('🔍 Fetching member data for user:', userId);
+      
+      // Fetch member data from database using user ID
+      const { data: memberData, error: memberError } = await db.members.getByUserId(userId);
+      
+      if (memberError) {
+        console.error('❌ Error fetching member data:', memberError);
+        throw new Error(`Failed to fetch member data: ${memberError.message || 'Unknown error'}`);
+      }
 
-      console.log('🎭 Using mock member data with UUID:', mockMemberId);
-      setMember(mockMember);
+      if (!memberData) {
+        console.log('❌ No member record found for user:', userId);
+        setAuthError('No membership found for your account. Please contact support.');
+        setLoading(false);
+        return;
+      }
+
+      console.log('✅ Member data fetched successfully:', {
+        id: memberData.id,
+        name: `${memberData.first_name} ${memberData.last_name}`,
+        status: memberData.status,
+        package: memberData.package_name
+      });
+
+      setMember(memberData);
+      setAuthError('');
+      
+      // Show success toast
+      toast({
+        title: "Welcome Back!",
+        description: `Your membership data has been loaded successfully, ${memberData.first_name}.`,
+      });
+      
     } catch (error) {
-      console.error('Error fetching member data:', error);
+      console.error('❌ Error in fetchMemberData:', error);
+      setAuthError(error instanceof Error ? error.message : 'Failed to load member data');
+      
       toast({
         title: "Error",
-        description: "Failed to load member data",
+        description: "Failed to load member data. Please try refreshing the page.",
         variant: "destructive",
       });
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      console.log('🔐 Signing out user...');
+      await auth.signOut();
+      
+      // Clear any stored verification status
+      localStorage.removeItem('user_verification_status');
+      
+      toast({
+        title: "Signed Out",
+        description: "You have been successfully signed out.",
+      });
+      
+      // Redirect to login page or home
+      window.location.href = '/login';
+    } catch (error) {
+      console.error('❌ Sign out error:', error);
+      toast({
+        title: "Error",
+        description: "Failed to sign out. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const refreshData = async () => {
+    if (!currentUser) {
+      await initializeDashboard();
+      return;
+    }
+    
+    setLoading(true);
+    await fetchMemberData(currentUser.id);
   };
 
   const handleMemberUpdate = (updatedMember: Member) => {
@@ -131,19 +205,23 @@ const MemberDashboard = () => {
   };
 
   const getStatusColor = (status: string) => {
-    switch (status) {
+    const normalizedStatus = status?.toLowerCase() || 'unknown';
+    switch (normalizedStatus) {
       case 'active': return 'bg-green-500/10 text-green-600 border-green-200';
       case 'expired': return 'bg-red-500/10 text-red-600 border-red-200';
       case 'suspended': return 'bg-yellow-500/10 text-yellow-600 border-yellow-200';
+      case 'pending': return 'bg-blue-500/10 text-blue-600 border-blue-200';
       default: return 'bg-gray-500/10 text-gray-600 border-gray-200';
     }
   };
 
   const getStatusIcon = (status: string) => {
-    switch (status) {
+    const normalizedStatus = status?.toLowerCase() || 'unknown';
+    switch (normalizedStatus) {
       case 'active': return <Activity className="h-3 w-3" />;
       case 'expired': return <AlertTriangle className="h-3 w-3" />;
       case 'suspended': return <Clock className="h-3 w-3" />;
+      case 'pending': return <Clock className="h-3 w-3" />;
       default: return <User className="h-3 w-3" />;
     }
   };
@@ -160,14 +238,15 @@ const MemberDashboard = () => {
           
           <div className="relative z-10 max-w-4xl mx-auto text-center text-white">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-muted-foreground">Loading your dashboard...</p>
+            <p className="text-xl mb-2">Loading your dashboard...</p>
+            <p className="text-gray-300">Authenticating and fetching your membership data</p>
           </div>
         </section>
       </div>
     );
   }
 
-  if (!member) {
+  if (authError || !member) {
     return (
       <div className="min-h-screen bg-background">
         {/* Error Hero Section */}
@@ -179,14 +258,35 @@ const MemberDashboard = () => {
           
           <div className="relative z-10 max-w-4xl mx-auto text-center text-white">
             <div className="w-20 h-20 bg-gradient-to-br from-red-500/20 to-orange-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
-              <AlertTriangle className="h-10 w-10 text-red-400" />
+              {authError.includes('log in') || authError.includes('Authentication') ? (
+                <Shield className="h-10 w-10 text-red-400" />
+              ) : (
+                <AlertTriangle className="h-10 w-10 text-red-400" />
+              )}
             </div>
-            <h2 className="text-3xl font-bold mb-4">Member Not Found</h2>
-            <p className="text-gray-300 mb-8">Please contact support for assistance.</p>
-            <Button size="lg" onClick={fetchMemberData} className="transform hover:scale-105 transition-all duration-300">
-              <RefreshCw className="h-5 w-5 mr-2" />
-              Try Again
-            </Button>
+            <h2 className="text-3xl font-bold mb-4">
+              {authError.includes('log in') || authError.includes('Authentication') ? 'Authentication Required' : 'Access Issue'}
+            </h2>
+            <p className="text-gray-300 mb-8 max-w-2xl mx-auto">{authError}</p>
+            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+              <Button size="lg" onClick={refreshData} className="transform hover:scale-105 transition-all duration-300">
+                <RefreshCw className="h-5 w-5 mr-2" />
+                Try Again
+              </Button>
+              {authError.includes('log in') || authError.includes('Authentication') ? (
+                <Button size="lg" variant="outline" asChild className="transform hover:scale-105 transition-all duration-300 text-white border-white hover:bg-white hover:text-gray-900">
+                  <a href="/login">
+                    <LogOut className="h-5 w-5 mr-2" />
+                    Go to Login
+                  </a>
+                </Button>
+              ) : (
+                <Button size="lg" variant="outline" onClick={handleSignOut} className="transform hover:scale-105 transition-all duration-300 text-white border-white hover:bg-white hover:text-gray-900">
+                  <LogOut className="h-5 w-5 mr-2" />
+                  Sign Out
+                </Button>
+              )}
+            </div>
           </div>
         </section>
       </div>
@@ -212,21 +312,41 @@ const MemberDashboard = () => {
                 Welcome back, <span className="bg-gradient-to-r from-primary to-blue-400 bg-clip-text text-transparent">{member.first_name}</span>!
               </h1>
               <p className="text-xl text-gray-300 mb-4">Manage your membership and stay on track with your fitness goals</p>
-              <div className="flex items-center gap-2">
-                <Shield className="h-5 w-5 text-green-400" />
-                <span className="text-green-400">Secure Member Portal</span>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <Shield className="h-5 w-5 text-green-400" />
+                  <span className="text-green-400">Secure Member Portal</span>
+                </div>
+                {currentUser && (
+                  <div className="flex items-center gap-2 text-gray-400">
+                    <User className="h-4 w-4" />
+                    <span className="text-sm">{currentUser.email}</span>
+                  </div>
+                )}
               </div>
             </div>
             
             <div className="flex flex-col sm:flex-row items-center gap-3 animate-fade-in-delay">
-              <Badge className={`${getStatusColor(member.status)} px-4 py-2 text-sm font-medium`}>
-                {getStatusIcon(member.status)}
-                <span className="ml-2">{member.status.charAt(0).toUpperCase() + member.status.slice(1)}</span>
-              </Badge>
-              <Badge variant="outline" className="px-4 py-2 text-sm border-white/20 text-white">
-                <Star className="h-3 w-3 mr-2" />
-                {member.package_type} • {member.package_name}
-              </Badge>
+              <div className="flex items-center gap-3">
+                <Badge className={`${getStatusColor(member?.status || 'unknown')} px-4 py-2 text-sm font-medium`}>
+                  {getStatusIcon(member?.status || 'unknown')}
+                  <span className="ml-2">{(member?.status || 'Unknown').charAt(0).toUpperCase() + (member?.status || 'unknown').slice(1)}</span>
+                </Badge>
+                <Badge variant="outline" className="px-4 py-2 text-sm border-white/20 text-white">
+                  <Star className="h-3 w-3 mr-2" />
+                  {member?.package_type || 'N/A'} • {member?.package_name || 'No Package'}
+                </Badge>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={refreshData} disabled={loading} className="text-white border-white/20 hover:bg-white/10">
+                  <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                  Refresh
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleSignOut} className="text-white border-white/20 hover:bg-white/10">
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Sign Out
+                </Button>
+              </div>
             </div>
           </div>
         </div>
@@ -258,10 +378,10 @@ const MemberDashboard = () => {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold capitalize group-hover:text-primary transition-colors duration-300">
-                  {member.status}
+                  {member?.status || 'Unknown'}
                 </div>
                 <p className="text-xs text-muted-foreground group-hover:text-foreground transition-colors duration-300">
-                  {member.is_verified ? 'Verified Account' : 'Pending Verification'}
+                  {member?.is_verified ? 'Verified Account' : 'Pending Verification'}
                 </p>
               </CardContent>
             </Card>
@@ -295,10 +415,10 @@ const MemberDashboard = () => {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold group-hover:text-primary transition-colors duration-300">
-                  ${animatedStats.price.toFixed(2)}
+                  ${member?.package_price ? animatedStats.price.toFixed(2) : '0.00'}
                 </div>
                 <p className="text-xs text-muted-foreground group-hover:text-foreground transition-colors duration-300">
-                  {member.package_name}
+                  {member?.package_name || 'No Package Selected'}
                 </p>
               </CardContent>
             </Card>
@@ -442,9 +562,10 @@ const MemberDashboard = () => {
                         <Star className="h-5 w-5 text-white" />
                       </div>
                       Membership Summary
+                      <Badge variant="outline" className="text-xs">Live Data</Badge>
                     </CardTitle>
                     <CardDescription className="group-hover:text-foreground transition-colors duration-300">
-                      Your current membership details
+                      Your current membership details from database
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4 relative z-10">
@@ -452,30 +573,34 @@ const MemberDashboard = () => {
                       <div className="space-y-3">
                         <div className="flex flex-col">
                           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Package</span>
-                          <span className="text-sm font-semibold">{member.package_name}</span>
+                          <span className="text-sm font-semibold">{member?.package_name || 'No Package'}</span>
                         </div>
                         <div className="flex flex-col">
                           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Type</span>
-                          <span className="text-sm font-semibold capitalize">{member.package_type}</span>
+                          <span className="text-sm font-semibold capitalize">{member?.package_type || 'N/A'}</span>
                         </div>
                         <div className="flex flex-col">
                           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Price</span>
-                          <span className="text-sm font-bold text-green-600">${member.package_price}</span>
+                          <span className="text-sm font-bold text-green-600">${member?.package_price || '0.00'}</span>
                         </div>
                       </div>
                       <div className="space-y-3">
                         <div className="flex flex-col">
                           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Start Date</span>
-                          <span className="text-sm font-semibold">{new Date(member.start_date).toLocaleDateString()}</span>
+                          <span className="text-sm font-semibold">
+                            {member?.start_date ? new Date(member.start_date).toLocaleDateString() : 'N/A'}
+                          </span>
                         </div>
                         <div className="flex flex-col">
                           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Expires</span>
-                          <span className="text-sm font-semibold">{new Date(member.expiry_date).toLocaleDateString()}</span>
+                          <span className="text-sm font-semibold">
+                            {member?.expiry_date ? new Date(member.expiry_date).toLocaleDateString() : 'N/A'}
+                          </span>
                         </div>
                         <div className="flex flex-col">
                           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Status</span>
-                          <Badge variant={member.is_verified ? "default" : "secondary"} className="w-fit">
-                            {member.is_verified ? "Verified" : "Unverified"}
+                          <Badge variant={member?.is_verified ? "default" : "secondary"} className="w-fit">
+                            {member?.is_verified ? "Verified" : "Unverified"}
                           </Badge>
                         </div>
                       </div>
@@ -502,7 +627,9 @@ const MemberDashboard = () => {
                     <div className="flex justify-between text-sm">
                       <span>Membership Duration</span>
                       <span className="font-semibold">
-                        {Math.floor((new Date().getTime() - new Date(member.start_date).getTime()) / (1000 * 60 * 60 * 24))} days active
+                        {member?.start_date ? 
+                          Math.floor((new Date().getTime() - new Date(member.start_date).getTime()) / (1000 * 60 * 60 * 24)) 
+                          : 0} days active
                       </span>
                     </div>
                     <div className="w-full bg-muted rounded-full h-2">
@@ -514,8 +641,8 @@ const MemberDashboard = () => {
                       ></div>
                     </div>
                     <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>Started: {new Date(member.start_date).toLocaleDateString()}</span>
-                      <span>Expires: {new Date(member.expiry_date).toLocaleDateString()}</span>
+                      <span>Started: {member?.start_date ? new Date(member.start_date).toLocaleDateString() : 'N/A'}</span>
+                      <span>Expires: {member?.expiry_date ? new Date(member.expiry_date).toLocaleDateString() : 'N/A'}</span>
                     </div>
                   </div>
                 </CardContent>
