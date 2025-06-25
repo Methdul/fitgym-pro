@@ -44,18 +44,20 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
   const fetchActivePackages = async () => {
     setLoadingPackages(true);
     try {
-      // Fetch only active packages for this specific branch
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/branch/${branchId}/active`);
+      // FIXED: Use the main packages endpoint which includes pricing for renewals
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/branch/${branchId}`, {
+        headers: getAuthHeaders()
+      });
       const result = await response.json();
       
       if (result.status === 'success') {
         setPackages(result.data || []);
-        console.log(`✅ Loaded ${result.data?.length || 0} active packages for renewal`);
+        console.log(`✅ Loaded ${result.data?.length || 0} packages for renewal`);
       } else {
         throw new Error(result.error || 'Failed to fetch packages');
       }
     } catch (error) {
-      console.error('Error fetching active packages:', error);
+      console.error('Error fetching packages:', error);
       toast({
         title: "Error",
         description: "Failed to load available packages for renewal",
@@ -76,10 +78,31 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
     }
   };
 
+  // FIXED: Added null safety and better error handling
   const handlePackageSelect = (pkg: PackageType) => {
+    console.log('📦 Package selected:', pkg); // Debug logging
+    
     setSelectedPackage(pkg);
-    setDuration(pkg.duration_months.toString());
-    setPrice(pkg.price.toString());
+    
+    // FIXED: Safe handling of duration with fallback
+    const safeDuration = pkg.duration_months || 1;
+    setDuration(safeDuration.toString());
+    
+    // FIXED: Safe handling of price with fallback and validation
+    const safePrice = pkg.price || 0;
+    if (safePrice === 0) {
+      console.warn('⚠️ Package price is missing or zero:', pkg);
+      toast({
+        title: "Package Price Missing",
+        description: "This package doesn't have pricing information. Please contact administrator.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    setPrice(safePrice.toString());
+    
+    console.log(`✅ Package selected: ${pkg.name} - $${safePrice} for ${safeDuration} months`);
   };
 
   const calculateNewExpiry = () => {
@@ -103,111 +126,97 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
       return;
     }
 
+    // FIXED: Validate price before processing
+    const priceValue = parseFloat(price);
+    if (!priceValue || priceValue <= 0) {
+      toast({
+        title: "Invalid Price",
+        description: "Please enter a valid price for the renewal",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // FIXED: Validate duration
+    const durationValue = parseInt(duration);
+    if (!durationValue || durationValue <= 0) {
+      toast({
+        title: "Invalid Duration",
+        description: "Please enter a valid duration for the renewal",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setLoading(true);
     try {
-      // Verify PIN
-      const { isValid } = await db.staff.verifyPin(verification.staffId, verification.pin);
-      
-      if (!isValid) {
-        toast({
-          title: "Invalid PIN",
-          description: "The entered PIN is incorrect",
-          variant: "destructive"
-        });
-        return;
-      }
-
-      const currentExpiry = new Date(member.expiry_date);
-      const newExpiry = new Date(currentExpiry);
-      newExpiry.setMonth(newExpiry.getMonth() + parseInt(duration));
-
-      console.log('🔄 Attempting member renewal update...');
-      
-      // Use simple member update with only basic fields (like member creation)
-      const updateData = {
-        expiry_date: newExpiry.toISOString().split('T')[0], // Date only, no time
-        status: 'active',
-        package_name: selectedPackage.name,
-        package_type: selectedPackage.type,
-        package_price: parseFloat(price),
-        updated_at: new Date().toISOString()
+      // FIXED: Use the new secure renewal processing endpoint
+      const renewalData = {
+        memberId: member.id,
+        packageId: selectedPackage.id,
+        paymentMethod: paymentMethod || 'cash',
+        amountPaid: priceValue,
+        durationMonths: durationValue,
+        staffId: verification.staffId,
+        staffPin: verification.pin
       };
 
-      console.log('📤 Sending renewal update data:', updateData);
+      console.log('🔄 Processing renewal with data:', {
+        ...renewalData,
+        staffPin: '[HIDDEN]' // Don't log PIN
+      });
 
-      const updateResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/members/${member.id}`, {
-        method: 'PUT',
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/renewals/process`, {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...getAuthHeaders()
         },
-        body: JSON.stringify(updateData),
+        body: JSON.stringify(renewalData)
       });
 
-      console.log('📥 Update response status:', updateResponse.status);
+      const result = await response.json();
 
-      if (!updateResponse.ok) {
-        const errorText = await updateResponse.text();
-        console.error('❌ Update failed:', errorText);
-        
-        // Try to parse error response
-        let errorMessage = 'Failed to renew membership';
-        try {
-          const errorData = JSON.parse(errorText);
-          errorMessage = errorData.error || errorData.message || errorMessage;
-        } catch {
-          errorMessage = `Server error (${updateResponse.status}): ${errorText}`;
+      if (!response.ok || result.status !== 'success') {
+        // Handle specific error cases
+        if (response.status === 429) {
+          throw new Error('Too many attempts. Please wait before trying again.');
         }
-        
-        throw new Error(errorMessage);
-      }
-
-      const result = await updateResponse.json();
-      console.log('✅ Renewal update successful:', result);
-
-      // Optional: Log the action (don't fail if this doesn't work)
-      try {
-        const logData = {
-          staff_id: verification.staffId,
-          action_type: 'MEMBER_RENEWED',
-          description: `Renewed membership for ${member.first_name} ${member.last_name} with ${selectedPackage.name} package until ${newExpiry.toLocaleDateString()}`,
-          created_at: new Date().toISOString()
-        };
-
-        await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/action-logs`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...getAuthHeaders()
-          },
-          body: JSON.stringify(logData),
-        });
-        
-        console.log('📝 Action log created successfully');
-      } catch (logError) {
-        console.warn('⚠️ Failed to create action log (non-critical):', logError);
+        if (response.status === 401) {
+          throw new Error('Invalid PIN. Please check and try again.');
+        }
+        throw new Error(result.error || result.message || 'Failed to process renewal');
       }
 
       toast({
-        title: "Renewal Successful! ✅",
-        description: `${member.first_name} ${member.last_name}'s membership renewed until ${newExpiry.toLocaleDateString()}`,
+        title: "Renewal Successful! 🎉",
+        description: `${member.first_name} ${member.last_name}'s membership has been renewed successfully.`,
       });
 
+      // Reset form and close modal
+      setStep(1);
+      setSelectedPackage(null);
+      setDuration('');
+      setPrice('');
+      setPaymentMethod(undefined);
+      setVerification({ staffId: '', pin: '' });
+      
       onRenewalComplete();
       onClose();
+
     } catch (error) {
-      console.error('❌ Error renewing membership:', error);
+      console.error('Error processing renewal:', error);
       toast({
         title: "Renewal Failed",
-        description: error instanceof Error ? error.message : "Failed to renew membership. Please try again.",
-        variant: "destructive",
+        description: error instanceof Error ? error.message : "Failed to process renewal",
+        variant: "destructive"
       });
     } finally {
       setLoading(false);
     }
   };
 
-  const resetModal = () => {
+  const resetForm = () => {
     setStep(1);
     setSelectedPackage(null);
     setDuration('');
@@ -216,82 +225,17 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
     setVerification({ staffId: '', pin: '' });
   };
 
-  const handleClose = () => {
-    resetModal();
-    onClose();
-  };
-
-  const validateStep = (stepNumber: number) => {
-    switch (stepNumber) {
-      case 1:
-        return selectedPackage !== null;
-      case 2:
-        return paymentMethod !== undefined;
-      case 3:
-        return verification.staffId !== '' && verification.pin !== '';
-      default:
-        return true;
-    }
-  };
-
-  const handleNext = () => {
-    if (!validateStep(step)) {
-      if (step === 1) {
-        toast({
-          title: "Package Required",
-          description: "Please select a package to continue",
-          variant: "destructive"
-        });
-      } else if (step === 2) {
-        toast({
-          title: "Payment Method Required",
-          description: "Please select a payment method",
-          variant: "destructive"
-        });
-      } else if (step === 3) {
-        toast({
-          title: "Verification Required",
-          description: "Please select staff member and enter PIN",
-          variant: "destructive"
-        });
-      }
-      return;
-    }
-
-    if (step < 4) {
-      setStep(step + 1);
-    }
-  };
-
-  const handleBack = () => {
-    if (step > 1) {
-      setStep(step - 1);
-    }
-  };
-
   if (!member) return null;
 
   return (
-    <Dialog open={isOpen} onOpenChange={handleClose}>
+    <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <CreditCard className="h-5 w-5" />
+            <Calendar className="h-5 w-5" />
             Renew Membership - {member.first_name} {member.last_name}
           </DialogTitle>
         </DialogHeader>
-
-        {/* Progress Indicator */}
-        <div className="flex space-x-2 mb-6">
-          {[1, 2, 3, 4].map((stepNum) => (
-            <div
-              key={stepNum}
-              className={`flex-1 h-2 rounded ${
-                step >= stepNum ? 'bg-primary' : 'bg-muted'
-              }`}
-            />
-          ))}
-        </div>
 
         {/* Step 1: Package Selection */}
         {step === 1 && (
@@ -302,29 +246,45 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
                 Select Package
               </h3>
               
+              {/* Current Member Info */}
+              <Card className="mb-6 bg-yellow-50 border-yellow-200">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base text-yellow-800">Current Membership</CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    <div>
+                      <p className="text-yellow-600 font-medium">Package</p>
+                      <p className="font-semibold text-yellow-900">{member.package_name || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <p className="text-yellow-600 font-medium">Type</p>
+                      <p className="font-semibold text-yellow-900 capitalize">{member.package_type || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <p className="text-yellow-600 font-medium">Status</p>
+                      <p className="font-semibold text-yellow-900 capitalize">{member.status}</p>
+                    </div>
+                    <div>
+                      <p className="text-yellow-600 font-medium">Expires</p>
+                      <p className="font-semibold text-yellow-900">
+                        {new Date(member.expiry_date).toLocaleDateString()}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
               {loadingPackages ? (
-                <div className="text-center py-8">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-                  <p className="text-muted-foreground">Loading available packages...</p>
-                </div>
-              ) : packages.length === 0 ? (
-                <div className="text-center py-8">
-                  <PackageIcon className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <h4 className="text-lg font-medium mb-2">No Active Packages Available</h4>
-                  <p className="text-muted-foreground">
-                    There are no active packages available for renewal at this branch.
-                    Please contact an administrator to add packages.
-                  </p>
+                <div className="flex items-center justify-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                  <span className="ml-2">Loading packages...</span>
                 </div>
               ) : (
                 <>
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                    <div className="flex items-center gap-2 text-blue-800 font-medium mb-1">
-                      <CheckCircle className="h-4 w-4" />
-                      Active Packages Only
-                    </div>
-                    <p className="text-sm text-blue-600">
-                      Showing {packages.length} active package{packages.length !== 1 ? 's' : ''} available for renewal
+                  <div className="mb-4">
+                    <p className="text-sm text-muted-foreground">
+                      {packages.length} package{packages.length !== 1 ? 's' : ''} available for renewal
                     </p>
                   </div>
                   
@@ -342,34 +302,39 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
                         <CardHeader className="pb-2">
                           <CardTitle className="text-lg">{pkg.name}</CardTitle>
                           <CardDescription className="text-2xl font-bold text-primary">
-                            ${pkg.price}
+                            {/* FIXED: Safe price display with fallback */}
+                            ${pkg.price || 'Contact Admin'}
                           </CardDescription>
                         </CardHeader>
                         <CardContent>
                           <div className="space-y-2">
                             <p className="text-sm text-muted-foreground">
-                              {pkg.duration_months} month{pkg.duration_months > 1 ? 's' : ''}
+                              {pkg.duration_months || 1} month{(pkg.duration_months || 1) > 1 ? 's' : ''}
                             </p>
+                            {/* FIXED: Safe max_members display */}
                             <div className="flex items-center gap-2">
                               <div className="inline-block px-2 py-1 text-xs rounded-full bg-secondary capitalize">
                                 {pkg.type}
                               </div>
-                              <div className="inline-block px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">
-                                Up to {pkg.max_members} member{pkg.max_members > 1 ? 's' : ''}
-                              </div>
-                            </div>
-                            <div className="space-y-1">
-                              {pkg.features.slice(0, 3).map((feature, index) => (
-                                <p key={index} className="text-xs text-muted-foreground">• {feature}</p>
-                              ))}
-                              {pkg.features.length > 3 && (
-                                <p className="text-xs text-muted-foreground">• +{pkg.features.length - 3} more features</p>
+                              {pkg.max_members && (
+                                <div className="inline-block px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">
+                                  Up to {pkg.max_members} member{pkg.max_members > 1 ? 's' : ''}
+                                </div>
                               )}
                             </div>
-                            {selectedPackage?.id === pkg.id && (
-                              <div className="flex items-center gap-1 text-primary pt-2">
-                                <CheckCircle className="h-4 w-4" />
-                                <span className="text-sm font-medium">Selected</span>
+                            {/* FIXED: Safe features display */}
+                            {pkg.features && pkg.features.length > 0 && (
+                              <div className="space-y-1">
+                                {pkg.features.slice(0, 3).map((feature, index) => (
+                                  <p key={index} className="text-xs text-muted-foreground">
+                                    • {feature}
+                                  </p>
+                                ))}
+                                {pkg.features.length > 3 && (
+                                  <p className="text-xs text-muted-foreground">
+                                    • +{pkg.features.length - 3} more features
+                                  </p>
+                                )}
                               </div>
                             )}
                           </div>
@@ -380,13 +345,16 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
                 </>
               )}
             </div>
-            
-            <div className="flex justify-end">
+
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={onClose}>
+                Cancel
+              </Button>
               <Button 
-                onClick={handleNext} 
-                disabled={!selectedPackage || packages.length === 0}
+                onClick={() => setStep(2)} 
+                disabled={!selectedPackage}
               >
-                Next: Payment Details
+                Next: Duration & Payment
               </Button>
             </div>
           </div>
@@ -410,6 +378,7 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
                     value={duration}
                     onChange={(e) => setDuration(e.target.value)}
                     min="1"
+                    max="24"
                   />
                 </div>
                 <div>
@@ -432,57 +401,33 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
                     <SelectValue placeholder="Select payment method" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="card">
-                      <div className="flex items-center gap-2">
-                        <CreditCard className="h-4 w-4" />
-                        Credit/Debit Card
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="cash">Cash Payment</SelectItem>
+                    <SelectItem value="cash">Cash</SelectItem>
+                    <SelectItem value="card">Credit/Debit Card</SelectItem>
+                    <SelectItem value="transfer">Bank Transfer</SelectItem>
+                    <SelectItem value="cheque">Cheque</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
-              <div className="bg-green-100 border border-green-300 rounded-lg p-6 mt-6">
-                <div className="flex items-center gap-2 mb-4">
-                  <CheckCircle className="h-5 w-5 text-green-700" />
-                  <span className="font-semibold text-green-900">Renewal Summary</span>
+              {/* New Expiry Preview */}
+              {duration && (
+                <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                  <p className="text-sm text-blue-700">
+                    <strong>New expiry date:</strong> {calculateNewExpiry()}
+                  </p>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className="text-green-600 font-medium">Current Expiry</p>
-                    <p className="font-semibold text-green-900">{new Date(member.expiry_date).toLocaleDateString()}</p>
-                  </div>
-                  <div>
-                    <p className="text-green-600 font-medium">New Expiry</p>
-                    <p className="font-semibold text-green-900">{calculateNewExpiry()}</p>
-                  </div>
-                  <div>
-                    <p className="text-green-600 font-medium">Extension Period</p>
-                    <p className="font-semibold text-green-900">{duration} month{parseInt(duration) > 1 ? 's' : ''}</p>
-                  </div>
-                  <div>
-                    <p className="text-green-600 font-medium">Package</p>
-                    <p className="font-semibold text-green-900">{selectedPackage?.name}</p>
-                  </div>
-                  <div>
-                    <p className="text-green-600 font-medium">Amount</p>
-                    <p className="font-semibold text-green-900">${price}</p>
-                  </div>
-                  <div>
-                    <p className="text-green-600 font-medium">Payment Method</p>
-                    <p className="font-semibold text-green-900 capitalize">{paymentMethod === 'card' ? 'Credit/Debit Card' : 'Cash Payment'}</p>
-                  </div>
-                </div>
-              </div>
+              )}
             </div>
 
             <div className="flex justify-between">
-              <Button variant="outline" onClick={handleBack}>
-                Back: Package Selection
+              <Button variant="outline" onClick={() => setStep(1)}>
+                Back
               </Button>
-              <Button onClick={handleNext} disabled={!validateStep(2)}>
-                Next: Staff Verification
+              <Button 
+                onClick={() => setStep(3)} 
+                disabled={!duration || !price || !paymentMethod}
+              >
+                Next: Verification
               </Button>
             </div>
           </div>
@@ -497,176 +442,99 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
                 Staff Verification
               </h3>
               
-              <Card className="bg-primary/5 border-primary/20 mb-6">
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Shield className="h-5 w-5 text-primary" />
-                    <h4 className="font-medium">Staff Verification Required</h4>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Please verify your identity to complete the membership renewal
-                  </p>
-                </CardContent>
-              </Card>
-
-              <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="staffMember">Select Your Name</Label>
+                  <Label htmlFor="staff">Authorizing Staff</Label>
                   <Select value={verification.staffId} onValueChange={(value) => setVerification(prev => ({ ...prev, staffId: value }))}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select staff member" />
                     </SelectTrigger>
                     <SelectContent>
-                      {staff.map((staffMember) => (
-                        <SelectItem key={staffMember.id} value={staffMember.id}>
-                          {staffMember.first_name} {staffMember.last_name} ({staffMember.role.replace('_', ' ')})
+                      {staff.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.first_name} {s.last_name} ({s.role})
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
-
                 <div>
-                  <Label htmlFor="pin">4-Digit PIN</Label>
+                  <Label htmlFor="pin">Staff PIN</Label>
                   <Input
                     id="pin"
                     type="password"
-                    maxLength={4}
+                    placeholder="Enter 4-digit PIN"
                     value={verification.pin}
-                    onChange={(e) => setVerification(prev => ({ ...prev, pin: e.target.value.replace(/\D/g, '') }))}
-                    placeholder="Enter your PIN"
+                    onChange={(e) => setVerification(prev => ({ ...prev, pin: e.target.value }))}
+                    maxLength={4}
                   />
                 </div>
-
-                {verification.staffId && (
-                  <div className="flex items-center gap-2 text-green-600 text-sm">
-                    <User className="h-4 w-4" />
-                    Staff member selected
-                  </div>
-                )}
               </div>
 
-              {selectedPackage && (
-                <Card className="bg-green-50 border-green-200 mt-6">
-                  <CardContent className="p-4">
-                    <h4 className="font-medium mb-2 text-green-800">Renewal Summary</h4>
-                    <div className="space-y-1 text-sm text-green-700">
-                      <p><strong>Member:</strong> {member.first_name} {member.last_name}</p>
-                      <p><strong>Package:</strong> {selectedPackage.name}</p>
-                      <p><strong>Duration:</strong> {duration} months</p>
-                      <p><strong>Amount:</strong> ${price}</p>
-                      <p><strong>New Expiry:</strong> {calculateNewExpiry()}</p>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-            </div>
-
-            <div className="flex justify-between">
-              <Button variant="outline" onClick={handleBack}>
-                Back: Payment Details
-              </Button>
-              <Button onClick={handleNext} disabled={!validateStep(3)}>
-                Next: Confirm Renewal
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Step 4: Final Confirmation */}
-        {step === 4 && (
-          <div className="space-y-6">
-            <div>
-              <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                <CheckCircle className="h-5 w-5" />
-                Confirm Renewal
-              </h3>
-              
-              <Card>
-                <CardHeader>
-                  <CardTitle>Final Confirmation</CardTitle>
+              {/* Renewal Summary */}
+              <Card className="mt-6 bg-green-50 border-green-200">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base text-green-800 flex items-center gap-2">
+                    <CheckCircle className="h-4 w-4" />
+                    Renewal Summary
+                  </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="bg-green-100 border border-green-300 rounded-lg p-6">
-                    <div className="flex items-center gap-2 mb-4">
-                      <CheckCircle className="h-5 w-5 text-green-700" />
-                      <span className="font-semibold text-green-900">Member & Package Details</span>
+                <CardContent className="pt-0">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    <div>
+                      <p className="text-green-600 font-medium">Member Name</p>
+                      <p className="font-semibold text-green-900">{member.first_name} {member.last_name}</p>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <p className="text-green-600 font-medium">Member Name</p>
-                        <p className="font-semibold text-green-900">{member.first_name} {member.last_name}</p>
-                      </div>
-                      <div>
-                        <p className="text-green-600 font-medium">Email</p>
-                        <p className="font-semibold text-green-900">{member.email}</p>
-                      </div>
-                      <div>
-                        <p className="text-green-600 font-medium">Phone</p>
-                        <p className="font-semibold text-green-900">{member.phone}</p>
-                      </div>
-                      <div>
-                        <p className="text-green-600 font-medium">National ID</p>
-                        <p className="font-semibold text-green-900">{member.national_id}</p>
-                      </div>
-                      <div>
-                        <p className="text-green-600 font-medium">New Package</p>
-                        <p className="font-semibold text-green-900">{selectedPackage?.name}</p>
-                      </div>
-                      <div>
-                        <p className="text-green-600 font-medium">Package Type</p>
-                        <p className="font-semibold text-green-900 capitalize">{selectedPackage?.type}</p>
-                      </div>
-                      <div>
-                        <p className="text-green-600 font-medium">Amount</p>
-                        <p className="font-semibold text-green-900">${price}</p>
-                      </div>
-                      <div>
-                        <p className="text-green-600 font-medium">Duration</p>
-                        <p className="font-semibold text-green-900">{duration} month{parseInt(duration) > 1 ? 's' : ''}</p>
-                      </div>
+                    <div>
+                      <p className="text-green-600 font-medium">Email</p>
+                      <p className="font-semibold text-green-900">{member.email}</p>
                     </div>
-                  </div>
-                  
-                  <div className="bg-blue-50 border border-blue-300 rounded-lg p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Calendar className="h-5 w-5 text-blue-700" />
-                      <span className="font-semibold text-blue-900">Renewal Summary</span>
+                    <div>
+                      <p className="text-green-600 font-medium">Phone</p>
+                      <p className="font-semibold text-green-900">{member.phone}</p>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <p className="text-blue-600 font-medium">Current Expiry</p>
-                        <p className="font-semibold text-blue-900">{new Date(member.expiry_date).toLocaleDateString()}</p>
-                      </div>
-                      <div>
-                        <p className="text-blue-600 font-medium">New Expiry</p>
-                        <p className="font-semibold text-blue-900">{calculateNewExpiry()}</p>
-                      </div>
+                    <div>
+                      <p className="text-green-600 font-medium">National ID</p>
+                      <p className="font-semibold text-green-900">{member.national_id}</p>
                     </div>
-                    <div className="mt-3 p-2 bg-blue-200 rounded text-center">
-                      <span className="font-bold text-blue-900">✅ Status: ACTIVE after renewal</span>
+                    <div>
+                      <p className="text-green-600 font-medium">New Package</p>
+                      <p className="font-semibold text-green-900">{selectedPackage?.name}</p>
                     </div>
-                  </div>
-
-                  <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Shield className="h-5 w-5 text-yellow-700" />
-                      <span className="font-semibold text-yellow-900">Verified Staff Member</span>
+                    <div>
+                      <p className="text-green-600 font-medium">Package Type</p>
+                      <p className="font-semibold text-green-900 capitalize">{selectedPackage?.type}</p>
                     </div>
-                    <p className="text-sm text-yellow-700">
-                      Renewal will be processed by: {staff.find(s => s.id === verification.staffId)?.first_name} {staff.find(s => s.id === verification.staffId)?.last_name}
-                    </p>
+                    <div>
+                      <p className="text-green-600 font-medium">Amount</p>
+                      <p className="font-semibold text-green-900">${price}</p>
+                    </div>
+                    <div>
+                      <p className="text-green-600 font-medium">Duration</p>
+                      <p className="font-semibold text-green-900">{duration} month{parseInt(duration) > 1 ? 's' : ''}</p>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
             </div>
 
             <div className="flex justify-between">
-              <Button variant="outline" onClick={handleBack}>
-                Back: Staff Verification
+              <Button variant="outline" onClick={() => setStep(2)}>
+                Back
               </Button>
-              <Button onClick={handleRenewal} disabled={loading} className="bg-green-600 hover:bg-green-700">
-                {loading ? 'Processing Renewal...' : 'Confirm Renewal'}
+              <Button 
+                onClick={handleRenewal} 
+                disabled={!verification.staffId || !verification.pin || loading}
+                className="bg-green-600 hover:bg-green-700"
+              >
+                {loading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Processing...
+                  </>
+                ) : (
+                  'Complete Renewal'
+                )}
               </Button>
             </div>
           </div>

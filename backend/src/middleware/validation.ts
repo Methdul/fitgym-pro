@@ -1,4 +1,4 @@
-// backend/src/middleware/validation.ts - COMPLETE WORKING VERSION
+// backend/src/middleware/validation.ts - DEVELOPMENT-FRIENDLY RATE LIMITS
 import { Request, Response, NextFunction } from 'express';
 import { body, param, query, validationResult } from 'express-validator';
 import rateLimit from 'express-rate-limit';
@@ -70,7 +70,7 @@ export const handleValidationErrors = (req: Request, res: Response, next: NextFu
   next();
 };
 
-// Rate limiting configurations
+// Rate limiting configurations - DEVELOPMENT-FRIENDLY
 export const createRateLimit = (windowMs: number, max: number, message: string) => {
   return rateLimit({
     windowMs,
@@ -100,24 +100,53 @@ export const createRateLimit = (windowMs: number, max: number, message: string) 
   });
 };
 
-// Common rate limits
+// DEVELOPMENT-FRIENDLY RATE LIMITS (Fixed the 429 errors)
 export const authRateLimit = createRateLimit(
+  15 * 60 * 1000, // 15 minutes
+  20, // 20 attempts (increased from 5) - PIN attempts still tracked separately
+  'Too many authentication attempts, please try again later'
+);
+
+export const apiRateLimit = createRateLimit(
+  1 * 60 * 1000, // 1 minute (reduced window)
+  100, // 100 requests per minute (much more reasonable for development)
+  'Too many API requests, please try again later'
+);
+
+export const strictRateLimit = createRateLimit(
+  1 * 60 * 1000, // 1 minute (reduced window)
+  30, // 30 requests per minute (increased from 5)
+  'Too many requests to this sensitive endpoint'
+);
+
+// PRODUCTION RATE LIMITS (can be switched via environment variable)
+export const productionAuthRateLimit = createRateLimit(
   15 * 60 * 1000, // 15 minutes
   5, // 5 attempts
   'Too many authentication attempts, please try again later'
 );
 
-export const apiRateLimit = createRateLimit(
+export const productionApiRateLimit = createRateLimit(
   15 * 60 * 1000, // 15 minutes  
-  10, // 10 requests (working rate limit)
+  50, // 50 requests per 15 minutes
   'Too many API requests, please try again later'
 );
 
-export const strictRateLimit = createRateLimit(
+export const productionStrictRateLimit = createRateLimit(
   5 * 60 * 1000, // 5 minutes
-  5, // 5 requests
+  10, // 10 requests per 5 minutes
   'Too many requests to this sensitive endpoint'
 );
+
+// Environment-based rate limit selection
+const isDevelopment = process.env.NODE_ENV === 'development' || process.env.NODE_ENV !== 'production';
+
+// Export appropriate rate limits based on environment
+export const currentAuthRateLimit = isDevelopment ? authRateLimit : productionAuthRateLimit;
+export const currentApiRateLimit = isDevelopment ? apiRateLimit : productionApiRateLimit;
+export const currentStrictRateLimit = isDevelopment ? strictRateLimit : productionStrictRateLimit;
+
+console.log(`🔧 Rate limits configured for: ${isDevelopment ? 'DEVELOPMENT' : 'PRODUCTION'}`);
 
 // UUID validation
 export const validateUUID = (field: string) => {
