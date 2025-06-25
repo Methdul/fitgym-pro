@@ -1,3 +1,4 @@
+// backend/src/middleware/auth.ts - COMPLETE WORKING VERSION
 import { Request, Response, NextFunction } from 'express';
 import { createClient } from '@supabase/supabase-js';
 
@@ -21,7 +22,15 @@ declare global {
   }
 }
 
-// Verify user authentication
+// Helper function to safely extract error messages
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+};
+
+// Verify Supabase JWT token
 export const verifyAuth = async (authHeader: string) => {
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     throw new Error('Missing or invalid authorization header');
@@ -31,10 +40,38 @@ export const verifyAuth = async (authHeader: string) => {
   const { data: { user }, error } = await supabase.auth.getUser(token);
   
   if (error || !user) {
-    throw new Error('Unauthorized');
+    throw new Error('Invalid or expired token');
   }
   
   return user;
+};
+
+// Verify session token (for staff PIN authentication)
+export const verifySessionToken = async (token: string) => {
+  if (!token || token.length < 32) {
+    throw new Error('Invalid session token format');
+  }
+
+  // Check if session exists in database
+  const { data: session, error } = await supabase
+    .from('branch_sessions')
+    .select('*, branch_staff(*)')
+    .eq('session_token', token)
+    .eq('is_active', true)
+    .gte('expires_at', new Date().toISOString())
+    .single();
+
+  if (error || !session) {
+    throw new Error('Invalid or expired session');
+  }
+
+  return {
+    id: session.branch_staff.id,
+    email: session.branch_staff.email,
+    role: session.branch_staff.role,
+    branchId: session.branch_staff.branch_id,
+    sessionType: 'branch_staff'
+  };
 };
 
 // Check if user is admin
@@ -48,204 +85,179 @@ export const isAdmin = async (userId: string) => {
   return data?.role === 'admin';
 };
 
-// NUCLEAR: Accept almost any reasonable token
-export const verifyBranchToken = async (token: string) => {
-  console.log('🔍 NUCLEAR: Token check:', token?.substring(0, 30) + '...');
-  
-  if (!token) {
-    console.log('❌ NUCLEAR: No token');
-    throw new Error('No token provided');
-  }
-  
-  // Accept any token longer than 10 characters
-  if (token.length > 10) {
-    console.log('✅ NUCLEAR: Token accepted (length:', token.length + ')');
-    return {
-      id: 'branch_session_user',
-      email: 'branch@session.com',
-      type: 'branch_session',
-      role: 'staff'
-    };
-  }
-  
-  console.log('❌ NUCLEAR: Token too short');
-  throw new Error('Token too short');
-};
-
-// NUCLEAR: Ultra-permissive authentication
+// SECURE: Main authentication middleware
 export const authenticate = async (req: Request, res: Response, next: NextFunction) => {
-  console.log('🚨 NUCLEAR AUTH v4.0 - RUNNING');
-  console.log('🔧 Path:', req.path);
-  console.log('🔧 Method:', req.method);
-  console.log('🔧 NODE_ENV:', process.env.NODE_ENV);
-  console.log('🔧 ALLOW_AUTH_BYPASS:', process.env.ALLOW_AUTH_BYPASS);
+  console.log(`🔐 Auth check: ${req.method} ${req.path}`);
   
   try {
     const authHeader = req.headers.authorization;
     const sessionTokenHeader = req.headers['x-session-token'] as string;
     
-    console.log('🔧 Auth header:', authHeader ? 'EXISTS' : 'MISSING');
-    console.log('🔧 Session header:', sessionTokenHeader ? 'EXISTS' : 'MISSING');
-    
-    if (authHeader) {
-      console.log('🔧 Auth header value:', authHeader.substring(0, 50) + '...');
-    }
+    // Method 1: Try session token first (for staff PIN auth)
     if (sessionTokenHeader) {
-      console.log('🔧 Session header value:', sessionTokenHeader.substring(0, 50) + '...');
-    }
-
-    // METHOD 1: Try X-Session-Token header first
-    if (sessionTokenHeader) {
-      console.log('🎫 METHOD 1: Trying session token header...');
       try {
-        const user = await verifyBranchToken(sessionTokenHeader);
+        const user = await verifySessionToken(sessionTokenHeader);
         req.user = user;
-        console.log('✅ METHOD 1: SUCCESS - Session token accepted');
-        next();
-        return;
+        console.log('✅ Session token authenticated');
+        return next();
       } catch (error) {
-        console.log('❌ METHOD 1: Failed -', error instanceof Error ? error.message : 'Unknown');
+        console.log('❌ Session token invalid:', getErrorMessage(error));
       }
     }
 
-    // METHOD 2: Try Authorization header
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.replace('Bearer ', '');
-      console.log('🎫 METHOD 2: Trying authorization token...');
-      
-      // Try Supabase first
+    // Method 2: Try JWT token (for regular user auth)
+    if (authHeader) {
       try {
-        console.log('🔍 METHOD 2A: Trying Supabase...');
         const user = await verifyAuth(authHeader);
         req.user = user;
-        console.log('✅ METHOD 2A: SUCCESS - Supabase auth');
-        next();
-        return;
-      } catch (supabaseError) {
-        console.log('❌ METHOD 2A: Supabase failed');
-        
-        // Try branch token
-        try {
-          console.log('🔍 METHOD 2B: Trying branch token...');
-          const user = await verifyBranchToken(token);
-          req.user = user;
-          console.log('✅ METHOD 2B: SUCCESS - Branch token accepted');
-          next();
-          return;
-        } catch (branchError) {
-          console.log('❌ METHOD 2B: Branch token failed -', branchError instanceof Error ? branchError.message : 'Unknown');
-        }
+        console.log('✅ JWT token authenticated');
+        return next();
+      } catch (error) {
+        console.log('❌ JWT token invalid:', getErrorMessage(error));
       }
     }
 
-    // METHOD 3: Development bypass (regardless of NODE_ENV if ALLOW_AUTH_BYPASS is true)
-    if (process.env.ALLOW_AUTH_BYPASS === 'true') {
-      console.log('🚨 METHOD 3: DEVELOPMENT BYPASS (ALLOW_AUTH_BYPASS=true)');
-      req.user = { id: 'dev_bypass', email: 'dev@bypass.com', role: 'dev' };
-      next();
-      return;
+    // ONLY allow bypass in development AND if explicitly enabled
+    if (process.env.NODE_ENV === 'development' && 
+        process.env.ALLOW_AUTH_BYPASS === 'true' &&
+        process.env.BYPASS_WARNING_ACKNOWLEDGED === 'true') {
+      console.log('⚠️ DEVELOPMENT BYPASS (acknowledged risk)');
+      req.user = { 
+        id: 'dev_bypass', 
+        email: 'dev@example.com', 
+        role: 'super_admin',
+        isDevelopmentBypass: true 
+      };
+      return next();
     }
 
-    // METHOD 4: Production emergency bypass for critical operations
-    const criticalPaths = ['/packages', '/members', '/staff', '/analytics'];
-    const isCriticalPath = criticalPaths.some(path => req.path.includes(path));
-    
-    if (isCriticalPath) {
-      console.log('🚨 METHOD 4: EMERGENCY PRODUCTION BYPASS (Critical Path)');
-      req.user = { id: 'emergency_user', email: 'emergency@bypass.com', role: 'staff' };
-      next();
-      return;
-    }
-
-    // METHOD 5: Final rejection
-    console.log('🚫 ALL METHODS FAILED - REJECTING');
+    // No valid authentication found
+    console.log('🚫 Authentication failed');
     return res.status(401).json({
       status: 'error',
-      error: 'Unauthorized',
-      message: 'All authentication methods failed',
-      debug: {
-        hasAuthHeader: !!authHeader,
-        hasSessionHeader: !!sessionTokenHeader,
-        nodeEnv: process.env.NODE_ENV,
-        allowBypass: process.env.ALLOW_AUTH_BYPASS,
-        path: req.path
-      }
+      error: 'Authentication required',
+      message: 'Valid authentication token required'
     });
 
   } catch (error) {
-    console.log('💥 NUCLEAR AUTH ERROR:', error);
-    
-    // Emergency fallback for any error
-    console.log('🚨 ERROR FALLBACK - ALLOWING REQUEST');
-    req.user = { id: 'error_fallback', email: 'error@fallback.com', role: 'staff' };
-    next();
+    console.error('💥 Authentication error:', getErrorMessage(error));
+    return res.status(401).json({
+      status: 'error',
+      error: 'Authentication failed',
+      message: 'Invalid authentication'
+    });
   }
 };
 
-// Admin-only middleware - ULTRA PERMISSIVE
+// SECURE: Admin-only middleware
 export const requireAdmin = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    console.log('👑 ADMIN CHECK');
+    if (!req.user) {
+      return res.status(401).json({
+        status: 'error',
+        error: 'Authentication required'
+      });
+    }
+
+    // Check if user is admin
+    const userIsAdmin = await isAdmin(req.user.id);
     
-    // Always allow if dev bypass is enabled
-    if (process.env.ALLOW_AUTH_BYPASS === 'true') {
-      console.log('👑 ADMIN: Dev bypass enabled');
-      req.userRole = 'admin';
-      next();
-      return;
+    if (!userIsAdmin && req.user.role !== 'admin') {
+      return res.status(403).json({
+        status: 'error',
+        error: 'Admin access required'
+      });
     }
     
-    // Allow anyone with a user object
-    if (req.user) {
-      console.log('👑 ADMIN: User exists, allowing admin access');
-      req.userRole = 'admin';
-      next();
-      return;
-    }
-    
-    // Emergency allow for critical operations
-    console.log('👑 ADMIN: Emergency bypass');
     req.userRole = 'admin';
     next();
     
   } catch (error) {
-    console.log('👑 ADMIN: Error, allowing anyway');
-    req.userRole = 'admin';
-    next();
+    console.error('Admin check error:', getErrorMessage(error));
+    return res.status(403).json({
+      status: 'error',
+      error: 'Admin verification failed'
+    });
   }
 };
 
-// Optional authentication - ALWAYS SUCCEEDS
+// SECURE: Optional authentication (for public endpoints that can benefit from auth)
 export const optionalAuth = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const authHeader = req.headers.authorization;
     const sessionTokenHeader = req.headers['x-session-token'] as string;
     
+    // Try to authenticate, but don't fail if no auth provided
     if (sessionTokenHeader) {
       try {
-        const user = await verifyBranchToken(sessionTokenHeader);
-        req.user = user;
+        req.user = await verifySessionToken(sessionTokenHeader);
       } catch (error) {
-        // Ignore errors in optional auth
+        // Ignore auth errors in optional auth
       }
     } else if (authHeader) {
-      const token = authHeader.replace('Bearer ', '');
       try {
-        const user = await verifyAuth(authHeader);
-        req.user = user;
-      } catch (supabaseError) {
-        try {
-          const user = await verifyBranchToken(token);
-          req.user = user;
-        } catch (branchError) {
-          // Ignore errors in optional auth
-        }
+        req.user = await verifyAuth(authHeader);
+      } catch (error) {
+        // Ignore auth errors in optional auth
       }
     }
     
+    // Always continue, regardless of auth status
     next();
   } catch (error) {
     // Always continue in optional auth
     next();
   }
+};
+
+// SECURE: Branch access validation
+export const validateBranchAccess = (requiredBranchId?: string) => {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({
+          status: 'error',
+          error: 'Authentication required'
+        });
+      }
+
+      const branchId = requiredBranchId || req.params.branchId;
+      
+      if (!branchId) {
+        return res.status(400).json({
+          status: 'error',
+          error: 'Branch ID required'
+        });
+      }
+
+      // Admin users can access any branch
+      if (req.user.role === 'admin') {
+        return next();
+      }
+
+      // Staff users can only access their assigned branch
+      if (req.user.sessionType === 'branch_staff') {
+        if (req.user.branchId !== branchId) {
+          return res.status(403).json({
+            status: 'error',
+            error: 'Access denied to this branch'
+          });
+        }
+        return next();
+      }
+
+      // Default deny
+      return res.status(403).json({
+        status: 'error',
+        error: 'Branch access not authorized'
+      });
+
+    } catch (error) {
+      console.error('Branch access validation error:', getErrorMessage(error));
+      return res.status(500).json({
+        status: 'error',
+        error: 'Access validation failed'
+      });
+    }
+  };
 };

@@ -202,6 +202,65 @@ export const auth = {
       return { data: null, error };
     }
   },
+
+  // NEW METHODS FOR MEMBER SETTINGS:
+
+  // Update user email
+  updateEmail: async (newEmail: string) => {
+    try {
+      const { data, error } = await supabase.auth.updateUser({
+        email: newEmail
+      });
+      return { data, error };
+    } catch (error) {
+      console.error('Update email error:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Update user profile data
+  updateProfile: async (updates: any) => {
+    try {
+      const { data, error } = await supabase.auth.updateUser({
+        data: updates
+      });
+      return { data, error };
+    } catch (error) {
+      console.error('Update profile error:', error);
+      return { data: null, error };
+    }
+  },
+
+  // Check if email confirmation is required
+  checkEmailConfirmation: async () => {
+    try {
+      const { data: { user }, error } = await supabase.auth.getUser();
+      if (error) throw error;
+      
+      return {
+        isConfirmed: user?.email_confirmed_at ? true : false,
+        email: user?.email,
+        confirmationSentAt: user?.confirmation_sent_at
+      };
+    } catch (error) {
+      console.error('Check email confirmation error:', error);
+      return { isConfirmed: false, email: null, confirmationSentAt: null };
+    }
+  },
+
+  // Resend email confirmation
+  resendEmailConfirmation: async () => {
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: (await supabase.auth.getUser()).data.user?.email || ''
+      });
+      return { error };
+    } catch (error) {
+      console.error('Resend confirmation error:', error);
+      return { error };
+    }
+  },
 };
 
 // Enhanced database helpers

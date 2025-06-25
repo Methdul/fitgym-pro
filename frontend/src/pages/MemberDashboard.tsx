@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { User, CreditCard, Calendar, Settings, AlertTriangle, Shield, Activity, TrendingUp, Clock, Star, ChevronRight, RefreshCw, LogOut } from 'lucide-react';
 import MemberProfile from '@/components/member/MemberProfile';
 import MemberMembership from '@/components/member/MemberMembership';
+import MemberSettings from '@/components/member/MemberSettings';
 import { VerificationBanner } from '@/components/VerificationBanner';
 import { useToast } from '@/hooks/use-toast';
 import { db, auth, supabase } from '@/lib/supabase';
@@ -621,18 +622,22 @@ const MemberDashboard = () => {
         {/* Enhanced Main Content */}
         <section className="py-8">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
-            <TabsList className="grid w-full grid-cols-3 p-1 bg-muted/50">
+            <TabsList className="grid w-full grid-cols-4 p-1 bg-muted/50">
               <TabsTrigger value="overview" className="relative">
                 <User className="h-4 w-4 mr-2" />
                 Overview
               </TabsTrigger>
               <TabsTrigger value="profile" className="relative">
-                <Settings className="h-4 w-4 mr-2" />
+                <User className="h-4 w-4 mr-2" />
                 Profile
               </TabsTrigger>
               <TabsTrigger value="membership" className="relative">
                 <CreditCard className="h-4 w-4 mr-2" />
                 Membership
+              </TabsTrigger>
+              <TabsTrigger value="settings" className="relative">
+                <Settings className="h-4 w-4 mr-2" />
+                Settings
               </TabsTrigger>
             </TabsList>
 
@@ -688,20 +693,23 @@ const MemberDashboard = () => {
                       </div>
                     </button>
                     
-                    <div className="w-full p-4 border rounded-xl bg-muted/30 group/item">
+                    <button 
+                      onClick={() => setActiveTab('settings')} 
+                      className="w-full p-4 text-left border rounded-xl hover:bg-primary/5 hover:border-primary/50 transition-all duration-300 group/item"
+                    >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-gradient-to-br from-gray-500/20 to-gray-600/20 rounded-lg flex items-center justify-center">
-                            <Settings className="h-5 w-5 text-gray-600" />
+                          <div className="w-10 h-10 bg-gradient-to-br from-purple-500/20 to-purple-600/20 rounded-lg flex items-center justify-center group-hover/item:scale-110 transition-transform duration-300">
+                            <Settings className="h-5 w-5 text-purple-600" />
                           </div>
                           <div>
-                            <p className="font-medium text-gray-600">Account Settings</p>
+                            <p className="font-medium group-hover/item:text-primary transition-colors duration-300">Account Settings</p>
                             <p className="text-sm text-muted-foreground">Password, email & security settings</p>
                           </div>
                         </div>
-                        <Badge variant="secondary" className="text-xs">Coming Soon</Badge>
+                        <ChevronRight className="h-5 w-5 text-muted-foreground group-hover/item:text-primary group-hover/item:translate-x-1 transition-all duration-300" />
                       </div>
-                    </div>
+                    </button>
                   </CardContent>
                 </Card>
 
@@ -806,6 +814,10 @@ const MemberDashboard = () => {
 
             <TabsContent value="membership">
               <MemberMembership member={member} onMemberUpdate={handleMemberUpdate} />
+            </TabsContent>
+
+            <TabsContent value="settings">
+              <MemberSettings member={member} onMemberUpdate={handleMemberUpdate} />
             </TabsContent>
           </Tabs>
         </section>

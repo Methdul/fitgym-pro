@@ -1,498 +1,492 @@
-import express from 'express';
+// backend/src/routes/packages.ts - COMPLETE WITH RBAC PROTECTION
+import express, { Request, Response } from 'express';
 import { supabase } from '../lib/supabase';
 import { authenticate, optionalAuth } from '../middleware/auth';
+import { 
+  commonValidations, 
+  strictRateLimit,
+  authRateLimit,
+  apiRateLimit,
+  validateUUID,
+  handleValidationErrors 
+} from '../middleware/validation';
+
+// Import RBAC system
+import {
+  requirePermission,
+  requireAnyPermission,
+  requireBranchAccess,
+  auditLog,
+  Permission,
+  rbacUtils
+} from '../middleware/rbac';
 
 const router = express.Router();
 
-// Debug middleware for this route
-router.use((req, res, next) => {
-  console.log(`🔧 Packages Route: ${req.method} ${req.path}`);
+// Debug middleware
+router.use((req: Request, res: Response, next) => {
+  console.log(`📦 Packages Route: ${req.method} ${req.path}`);
   next();
 });
 
-// Get packages by branch (for staff dashboard)
-router.get('/branch/:branchId', optionalAuth, async (req, res) => {
-  try {
-    console.log(`📦 Getting packages for branch: ${req.params.branchId}`);
-    
-    const { data, error } = await supabase
-      .from('packages')
-      .select('*')
-      .eq('branch_id', req.params.branchId)
-      .order('max_members', { ascending: true });
-    
-    if (error) {
-      console.error('Database error:', error);
-      throw error;
+// Get packages by branch - RBAC PROTECTED
+router.get('/branch/:branchId', 
+  [validateUUID('branchId'), handleValidationErrors],
+  authenticate,
+  requireBranchAccess(Permission.PACKAGES_READ),
+  auditLog('READ_BRANCH_PACKAGES', 'package'),
+  async (req: Request, res: Response) => {
+    try {
+      const { branchId } = req.params;
+      
+      console.log(`📦 Getting packages for branch: ${branchId}`);
+      
+      // Get user permissions to determine what data to return
+      const userPermissions = await rbacUtils.getUserPermissions(req.user);
+      
+      // Select fields based on permissions
+      let selectFields = 'id, name, type, duration_months, features, is_active';
+      
+      if (rbacUtils.hasPermission(userPermissions, Permission.PACKAGES_PRICING)) {
+        // Include pricing info for users with pricing permission
+        selectFields = 'id, name, type, price, duration_months, features, is_active, created_at, updated_at';
+      }
+      
+      const { data, error } = await supabase
+        .from('packages')
+        .select(selectFields)
+        .eq('is_active', true)
+        .order('price', { ascending: true });
+      
+      if (error) {
+        console.error('Database error:', error);
+        throw new Error('Failed to fetch packages');
+      }
+      
+      console.log(`✅ Found ${data?.length || 0} packages for branch`);
+      
+      res.json({ 
+        status: 'success', 
+        data: data || [],
+        permissions: {
+          canEdit: rbacUtils.hasPermission(userPermissions, Permission.PACKAGES_WRITE),
+          canDelete: rbacUtils.hasPermission(userPermissions, Permission.PACKAGES_DELETE),
+          canViewPricing: rbacUtils.hasPermission(userPermissions, Permission.PACKAGES_PRICING)
+        }
+      });
+    } catch (error) {
+      console.error('Error fetching branch packages:', error);
+      res.status(500).json({
+        status: 'error',
+        error: 'Failed to fetch branch packages',
+        message: 'An error occurred while retrieving package data'
+      });
     }
-    
-    console.log(`✅ Found ${data?.length || 0} packages for branch`);
-    
-    res.json({ 
-      status: 'success', 
-      data: data || []
-    });
-  } catch (error) {
-    console.error('Error fetching branch packages:', error);
-    res.status(500).json({
-      status: 'error',
-      error: 'Failed to fetch branch packages',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    });
   }
-});
+);
 
-// Get all active packages for a branch (public access)
-router.get('/branch/:branchId/active', optionalAuth, async (req, res) => {
-  try {
-    console.log(`📦 Getting active packages for branch: ${req.params.branchId}`);
-    
-    const { data, error } = await supabase
-      .from('packages')
-      .select('*')
-      .eq('branch_id', req.params.branchId)
-      .eq('is_active', true)
-      .order('max_members', { ascending: true });
-    
-    if (error) {
-      console.error('Database error:', error);
-      throw error;
+// Get all active packages for a branch (public with optional auth)
+router.get('/branch/:branchId/active', 
+  [validateUUID('branchId'), handleValidationErrors],
+  optionalAuth,
+  auditLog('READ_ACTIVE_PACKAGES', 'package'),
+  async (req: Request, res: Response) => {
+    try {
+      const { branchId } = req.params;
+      
+      console.log(`📦 Getting active packages for branch: ${branchId}`);
+      
+      // Public endpoint - limited data
+      const { data, error } = await supabase
+        .from('packages')
+        .select('id, name, type, duration_months, features')
+        .eq('is_active', true)
+        .order('price', { ascending: true });
+      
+      if (error) {
+        console.error('Database error:', error);
+        throw new Error('Failed to fetch active packages');
+      }
+      
+      console.log(`✅ Found ${data?.length || 0} active packages for branch`);
+      
+      res.json({ 
+        status: 'success', 
+        data: data || []
+      });
+    } catch (error) {
+      console.error('Error fetching active branch packages:', error);
+      res.status(500).json({
+        status: 'error',
+        error: 'Failed to fetch active branch packages',
+        message: 'An error occurred while retrieving active packages'
+      });
     }
-    
-    console.log(`✅ Found ${data?.length || 0} active packages for branch`);
-    
-    res.json({ 
-      status: 'success', 
-      data: data || []
-    });
-  } catch (error) {
-    console.error('Error fetching active branch packages:', error);
-    res.status(500).json({
-      status: 'error',
-      error: 'Failed to fetch active branch packages',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    });
   }
-});
+);
 
-// Get all active packages (admin only)
-router.get('/active', authenticate, async (req, res) => {
-  try {
-    console.log('📦 Getting all active packages (admin)');
-    
-    const { data, error } = await supabase
-      .from('packages')
-      .select('*, branches(name)')
-      .eq('is_active', true)
-      .order('max_members', { ascending: true });
-    
-    if (error) {
-      console.error('Database error:', error);
-      throw error;
+// Get all packages (admin only) - RBAC PROTECTED
+router.get('/', 
+  authenticate,
+  requirePermission(Permission.PACKAGES_READ),
+  auditLog('READ_ALL_PACKAGES', 'package'),
+  async (req: Request, res: Response) => {
+    try {
+      console.log('📦 Getting all packages (admin)');
+      
+      const userPermissions = await rbacUtils.getUserPermissions(req.user);
+      
+      // Select fields based on permissions
+      let selectFields = 'id, name, type, duration_months, features, is_active, created_at';
+      
+      if (rbacUtils.hasPermission(userPermissions, Permission.PACKAGES_PRICING)) {
+        selectFields = 'id, name, type, price, duration_months, features, is_active, created_at, updated_at';
+      }
+      
+      const { data, error } = await supabase
+        .from('packages')
+        .select(selectFields)
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        console.error('Database error:', error);
+        throw error;
+      }
+      
+      console.log(`✅ Found ${data?.length || 0} total packages`);
+      
+      res.json({ 
+        status: 'success', 
+        data: data || [],
+        permissions: {
+          canEdit: rbacUtils.hasPermission(userPermissions, Permission.PACKAGES_WRITE),
+          canDelete: rbacUtils.hasPermission(userPermissions, Permission.PACKAGES_DELETE),
+          canViewPricing: rbacUtils.hasPermission(userPermissions, Permission.PACKAGES_PRICING)
+        }
+      });
+    } catch (error) {
+      console.error('Error fetching all packages:', error);
+      res.status(500).json({
+        status: 'error',
+        error: 'Failed to fetch packages',
+        message: 'An error occurred while retrieving packages'
+      });
     }
-    
-    console.log(`✅ Found ${data?.length || 0} active packages across all branches`);
-    
-    res.json({ 
-      status: 'success', 
-      data: data || []
-    });
-  } catch (error) {
-    console.error('Error fetching all active packages:', error);
-    res.status(500).json({
-      status: 'error',
-      error: 'Failed to fetch active packages',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    });
   }
-});
+);
 
-// Get all packages (admin access)
-router.get('/', authenticate, async (req, res) => {
-  try {
-    console.log('📦 Getting all packages (admin)');
-    
-    const { data, error } = await supabase
-      .from('packages')
-      .select('*, branches(name)')
-      .order('max_members', { ascending: true });
-    
-    if (error) throw error;
-    
-    console.log(`✅ Found ${data?.length || 0} total packages across all branches`);
-    
-    res.json({ 
-      status: 'success', 
-      data: data || []
-    });
-  } catch (error) {
-    console.error('Error fetching all packages:', error);
-    res.status(500).json({
-      status: 'error',
-      error: 'Failed to fetch packages'
-    });
-  }
-});
+// Get single package - RBAC PROTECTED
+router.get('/:id', 
+  [validateUUID('id'), handleValidationErrors],
+  authenticate,
+  requirePermission(Permission.PACKAGES_READ),
+  auditLog('READ_PACKAGE', 'package'),
+  async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
 
-// Get single package
-router.get('/:id', optionalAuth, async (req, res) => {
-  try {
-    console.log(`📦 Getting package: ${req.params.id}`);
-    
-    const { id } = req.params;
+      console.log(`📦 Getting package: ${id}`);
 
-    const { data, error } = await supabase
-      .from('packages')
-      .select('*, branches(name)')
-      .eq('id', id)
-      .single();
+      const userPermissions = await rbacUtils.getUserPermissions(req.user);
+      
+      let selectFields = 'id, name, type, duration_months, features, is_active';
+      
+      if (rbacUtils.hasPermission(userPermissions, Permission.PACKAGES_PRICING)) {
+        selectFields = 'id, name, type, price, duration_months, features, is_active, created_at, updated_at';
+      }
 
-    if (error || !data) {
-      return res.status(404).json({
-        status: 'error',
-        error: 'Package not found'
-      });
-    }
+      const { data, error } = await supabase
+        .from('packages')
+        .select(selectFields)
+        .eq('id', id)
+        .single();
 
-    console.log('✅ Package found');
-
-    res.json({
-      status: 'success',
-      data
-    });
-
-  } catch (error) {
-    console.error('Error fetching package:', error);
-    res.status(500).json({
-      status: 'error',
-      error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-});
-
-// Create new package (with improved error handling)
-router.post('/', authenticate, async (req, res) => {
-  try {
-    console.log('➕ Creating new package with data:', req.body);
-    
-    const { branch_id, name, type, price, duration_months, max_members, features, is_active = true } = req.body;
-
-    // Basic validation with detailed logging
-    if (!branch_id) {
-      console.log('❌ Missing branch_id');
-      return res.status(400).json({
-        status: 'error',
-        error: 'Missing branch_id'
-      });
-    }
-
-    if (!name) {
-      console.log('❌ Missing name');
-      return res.status(400).json({
-        status: 'error',
-        error: 'Missing package name'
-      });
-    }
-
-    if (!type) {
-      console.log('❌ Missing type');
-      return res.status(400).json({
-        status: 'error',
-        error: 'Missing package type'
-      });
-    }
-
-    if (price === undefined || price === null) {
-      console.log('❌ Missing price');
-      return res.status(400).json({
-        status: 'error',
-        error: 'Missing price'
-      });
-    }
-
-    if (!duration_months) {
-      console.log('❌ Missing duration_months');
-      return res.status(400).json({
-        status: 'error',
-        error: 'Missing duration_months'
-      });
-    }
-
-    // Handle max_members with default fallback
-    let maxMembersValue = 1; // Default value
-    if (max_members !== undefined && max_members !== null && max_members !== '') {
-      maxMembersValue = parseInt(max_members);
-      if (isNaN(maxMembersValue) || maxMembersValue < 1 || maxMembersValue > 10) {
-        console.log('❌ Invalid max_members value:', max_members);
-        return res.status(400).json({
+      if (error || !data) {
+        return res.status(404).json({
           status: 'error',
-          error: 'Max members must be between 1 and 10'
+          error: 'Package not found'
         });
       }
-    }
 
-    // Set default max_members based on type if not provided
-    if (!max_members || max_members === '') {
-      switch (type) {
-        case 'individual': maxMembersValue = 1; break;
-        case 'couple': maxMembersValue = 2; break;
-        case 'family': maxMembersValue = 4; break;
-        default: maxMembersValue = 1; break;
+      console.log('✅ Package found');
+
+      res.json({
+        status: 'success',
+        data,
+        permissions: {
+          canEdit: rbacUtils.hasPermission(userPermissions, Permission.PACKAGES_WRITE),
+          canDelete: rbacUtils.hasPermission(userPermissions, Permission.PACKAGES_DELETE)
+        }
+      });
+
+    } catch (error) {
+      console.error('Error fetching package:', error);
+      res.status(500).json({
+        status: 'error',
+        error: 'Failed to fetch package',
+        message: 'An error occurred while retrieving the package'
+      });
+    }
+  }
+);
+
+// Create package - RBAC PROTECTED
+router.post('/',
+  strictRateLimit,
+  authenticate,
+  requirePermission(Permission.PACKAGES_WRITE),
+  commonValidations.createPackage,
+  auditLog('CREATE_PACKAGE', 'package'),
+  async (req: Request, res: Response) => {
+    try {
+      console.log('📦 Creating new package');
+      
+      const { 
+        name, 
+        type, 
+        price, 
+        duration_months, 
+        features, 
+        is_active 
+      } = req.body;
+      
+      // Check if user has pricing permission to set price
+      const userPermissions = await rbacUtils.getUserPermissions(req.user);
+      
+      if (!rbacUtils.hasPermission(userPermissions, Permission.PACKAGES_PRICING)) {
+        return res.status(403).json({
+          status: 'error',
+          error: 'Insufficient permissions',
+          message: 'Setting package pricing requires additional permissions'
+        });
       }
-    }
+      
+      // Check for duplicate package name
+      const { data: existingPackage } = await supabase
+        .from('packages')
+        .select('id, name')
+        .eq('name', name)
+        .single();
 
-    console.log('🔧 Processing with max_members:', maxMembersValue);
+      if (existingPackage) {
+        return res.status(409).json({
+          status: 'error',
+          error: 'Package with this name already exists'
+        });
+      }
 
-    // Validate type
-    const validTypes = ['individual', 'couple', 'family'];
-    if (!validTypes.includes(type)) {
-      console.log('❌ Invalid package type:', type);
-      return res.status(400).json({
-        status: 'error',
-        error: 'Invalid package type. Must be individual, couple, or family'
+      // Prepare package data
+      const packageData = {
+        name: name.trim(),
+        type,
+        price: parseFloat(price),
+        duration_months: parseInt(duration_months),
+        features: Array.isArray(features) ? features : ['Gym Access'],
+        is_active: Boolean(is_active),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      console.log('💾 Creating package with data:', packageData);
+
+      // Create package
+      const { data, error } = await supabase
+        .from('packages')
+        .insert(packageData)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('❌ Database error:', error);
+        throw new Error('Failed to create package');
+      }
+
+      console.log('✅ Package created successfully:', data.id);
+
+      res.status(201).json({
+        status: 'success',
+        data,
+        message: 'Package created successfully'
       });
-    }
 
-    // Convert and validate price
-    const priceNum = parseFloat(price);
-    if (isNaN(priceNum) || priceNum < 0) {
-      console.log('❌ Invalid price value:', price);
-      return res.status(400).json({
-        status: 'error',
-        error: 'Price must be 0 or greater'
-      });
-    }
-
-    // Convert and validate duration
-    const durationNum = parseInt(duration_months);
-    if (isNaN(durationNum) || durationNum < 1) {
-      console.log('❌ Invalid duration value:', duration_months);
-      return res.status(400).json({
-        status: 'error',
-        error: 'Duration must be at least 1 month'
-      });
-    }
-
-    // Check if branch exists
-    console.log('🔍 Checking if branch exists:', branch_id);
-    const { data: branch, error: branchError } = await supabase
-      .from('branches')
-      .select('id')
-      .eq('id', branch_id)
-      .single();
-
-    if (branchError || !branch) {
-      console.log('❌ Branch not found or error:', branchError);
-      return res.status(404).json({
-        status: 'error',
-        error: 'Branch not found'
-      });
-    }
-
-    // Prepare package data
-    const packageData = {
-      branch_id,
-      name: name.trim(),
-      type,
-      price: priceNum,
-      duration_months: durationNum,
-      max_members: maxMembersValue,
-      features: Array.isArray(features) ? features : ['Gym Access', 'Locker Room'],
-      is_active: Boolean(is_active),
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-
-    console.log('💾 Inserting package with data:', packageData);
-
-    // Create package
-    const { data, error } = await supabase
-      .from('packages')
-      .insert(packageData)
-      .select()
-      .single();
-
-    if (error) {
-      console.error('❌ Database error details:', error);
-      return res.status(500).json({
+    } catch (error) {
+      console.error('❌ Error creating package:', error);
+      res.status(500).json({
         status: 'error',
         error: 'Failed to create package',
-        message: error.message,
-        details: error.details || 'No additional details'
+        message: 'An error occurred while creating the package'
       });
     }
-
-    console.log('✅ Package created successfully:', data.id);
-
-    res.status(201).json({
-      status: 'success',
-      data,
-      message: 'Package created successfully'
-    });
-
-  } catch (error) {
-    console.error('❌ Unexpected error creating package:', error);
-    res.status(500).json({
-      status: 'error',
-      error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Unknown error',
-      stack: process.env.NODE_ENV === 'development' ? (error instanceof Error ? error.stack : '') : undefined
-    });
   }
-});
+);
 
-// Update package
-router.put('/:id', authenticate, async (req, res) => {
-  try {
-    console.log(`🔄 Updating package: ${req.params.id}`);
-    
-    const { id } = req.params;
-    const updateData = { ...req.body, updated_at: new Date().toISOString() };
-
-    // Remove undefined values
-    Object.keys(updateData).forEach(key => 
-      updateData[key] === undefined && delete updateData[key]
-    );
-
-    // Validate max_members if provided
-    if (updateData.max_members !== undefined) {
-      const maxMembersNum = parseInt(updateData.max_members);
-      if (isNaN(maxMembersNum) || maxMembersNum < 1 || maxMembersNum > 10) {
-        return res.status(400).json({
+// Update package - RBAC PROTECTED
+router.put('/:id',
+  authRateLimit,
+  authenticate,
+  requirePermission(Permission.PACKAGES_WRITE),
+  [validateUUID('id'), handleValidationErrors],
+  auditLog('UPDATE_PACKAGE', 'package'),
+  async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const updateData = { ...req.body, updated_at: new Date().toISOString() };
+      
+      console.log(`🔄 Updating package: ${id}`);
+      
+      // Check if user has pricing permission for price changes
+      const userPermissions = await rbacUtils.getUserPermissions(req.user);
+      
+      if (updateData.price && !rbacUtils.hasPermission(userPermissions, Permission.PACKAGES_PRICING)) {
+        return res.status(403).json({
           status: 'error',
-          error: 'Max members must be between 1 and 10'
+          error: 'Insufficient permissions',
+          message: 'Updating package pricing requires additional permissions'
         });
       }
-      updateData.max_members = maxMembersNum;
-    }
-
-    // Validate price if provided
-    if (updateData.price !== undefined) {
-      const priceNum = parseFloat(updateData.price);
-      if (isNaN(priceNum) || priceNum < 0) {
-        return res.status(400).json({
-          status: 'error',
-          error: 'Price must be 0 or greater'
-        });
-      }
-      updateData.price = priceNum;
-    }
-
-    // Validate duration if provided
-    if (updateData.duration_months !== undefined) {
-      const durationNum = parseInt(updateData.duration_months);
-      if (isNaN(durationNum) || durationNum < 1) {
-        return res.status(400).json({
-          status: 'error',
-          error: 'Duration must be at least 1 month'
-        });
-      }
-      updateData.duration_months = durationNum;
-    }
-
-    // Get existing package
-    const { data: existingPackage, error: fetchError } = await supabase
-      .from('packages')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (fetchError || !existingPackage) {
-      return res.status(404).json({
-        status: 'error',
-        error: 'Package not found'
+      
+      // Remove undefined values and protected fields
+      Object.keys(updateData).forEach(key => {
+        if (updateData[key] === undefined || key === 'id' || key === 'created_at') {
+          delete updateData[key];
+        }
       });
-    }
-
-    // Update package
-    const { data, error } = await supabase
-      .from('packages')
-      .update(updateData)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) {
-      console.error('❌ Update error:', error);
-      return res.status(500).json({
+      
+      // Verify package exists
+      const { data: existingPackage, error: fetchError } = await supabase
+        .from('packages')
+        .select('id, name')
+        .eq('id', id)
+        .single();
+      
+      if (fetchError || !existingPackage) {
+        return res.status(404).json({
+          status: 'error',
+          error: 'Package not found'
+        });
+      }
+      
+      // Update package
+      const { data, error } = await supabase
+        .from('packages')
+        .update(updateData)
+        .eq('id', id)
+        .select()
+        .single();
+      
+      if (error) {
+        console.error('Database error updating package:', error);
+        throw new Error('Failed to update package');
+      }
+      
+      console.log('✅ Package updated successfully');
+      
+      res.json({
+        status: 'success',
+        data,
+        message: 'Package updated successfully'
+      });
+      
+    } catch (error) {
+      console.error('Error updating package:', error);
+      res.status(500).json({
         status: 'error',
         error: 'Failed to update package',
-        message: error.message
+        message: 'An error occurred while updating the package'
       });
     }
-
-    console.log('✅ Package updated successfully');
-
-    res.json({
-      status: 'success',
-      data,
-      message: 'Package updated successfully'
-    });
-
-  } catch (error) {
-    console.error('Error updating package:', error);
-    res.status(500).json({
-      status: 'error',
-      error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    });
   }
-});
+);
 
-// Delete package
-router.delete('/:id', authenticate, async (req, res) => {
-  try {
-    console.log(`🗑️ Deleting package: ${req.params.id}`);
-    
-    const { id } = req.params;
-
-    // Get package to verify existence
-    const { data: packageData, error: fetchError } = await supabase
-      .from('packages')
-      .select('*, branches(name)')
-      .eq('id', id)
-      .single();
-
-    if (fetchError || !packageData) {
-      return res.status(404).json({
-        status: 'error',
-        error: 'Package not found'
+// Delete package - RBAC PROTECTED (High Security)
+router.delete('/:id',
+  strictRateLimit,
+  authenticate,
+  requirePermission(Permission.PACKAGES_DELETE),
+  [validateUUID('id'), handleValidationErrors],
+  auditLog('DELETE_PACKAGE', 'package'),
+  async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      
+      console.log(`🗑️ Deleting package: ${id}`);
+      
+      // Check if package has active members
+      const { data: activeMembers, error: memberError } = await supabase
+        .from('members')
+        .select('id')
+        .eq('package_name', (await supabase.from('packages').select('name').eq('id', id).single()).data?.name)
+        .eq('status', 'active');
+      
+      if (memberError) {
+        console.error('Error checking active members:', memberError);
+        throw new Error('Failed to check package usage');
+      }
+      
+      if (activeMembers && activeMembers.length > 0) {
+        return res.status(409).json({
+          status: 'error',
+          error: 'Cannot delete package with active members',
+          message: `This package has ${activeMembers.length} active members`
+        });
+      }
+      
+      // Soft delete (deactivate instead of hard delete)
+      const { error } = await supabase
+        .from('packages')
+        .update({ 
+          is_active: false,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', id);
+      
+      if (error) {
+        console.error('Database error deleting package:', error);
+        throw new Error('Failed to delete package');
+      }
+      
+      console.log('✅ Package deleted (deactivated) successfully');
+      
+      res.json({
+        status: 'success',
+        message: 'Package deleted successfully'
       });
-    }
-
-    // Delete package
-    const { error } = await supabase
-      .from('packages')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      console.error('❌ Delete error:', error);
-      return res.status(500).json({
+      
+    } catch (error) {
+      console.error('Error deleting package:', error);
+      res.status(500).json({
         status: 'error',
         error: 'Failed to delete package',
-        message: error.message
+        message: 'An error occurred while deleting the package'
       });
     }
-
-    console.log('✅ Package deleted successfully');
-
-    res.json({
-      status: 'success',
-      message: `Package ${packageData.name} deleted successfully`
-    });
-
-  } catch (error) {
-    console.error('Error deleting package:', error);
-    res.status(500).json({
-      status: 'error',
-      error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    });
   }
-});
+);
 
-console.log('📦 Package routes loaded successfully');
+// Get user's permissions for this module (for frontend UI)
+router.get('/permissions', 
+  authenticate,
+  async (req: Request, res: Response) => {
+    try {
+      const userPermissions = await rbacUtils.getUserPermissions(req.user);
+      
+      res.json({
+        status: 'success',
+        permissions: {
+          canRead: rbacUtils.hasPermission(userPermissions, Permission.PACKAGES_READ),
+          canWrite: rbacUtils.hasPermission(userPermissions, Permission.PACKAGES_WRITE),
+          canDelete: rbacUtils.hasPermission(userPermissions, Permission.PACKAGES_DELETE),
+          canViewPricing: rbacUtils.hasPermission(userPermissions, Permission.PACKAGES_PRICING)
+        }
+      });
+    } catch (error) {
+      console.error('Error getting permissions:', error);
+      res.status(500).json({
+        status: 'error',
+        error: 'Failed to get permissions'
+      });
+    }
+  }
+);
 
 export { router as packageRoutes };
