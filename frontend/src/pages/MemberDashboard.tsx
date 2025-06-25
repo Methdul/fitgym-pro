@@ -150,7 +150,7 @@ const MemberDashboard = () => {
   const fetchMemberData = async (userId: string) => {
     try {
       console.log('🔍 Fetching member data for user:', userId);
-      console.log('📧 User email:', currentUser?.email || 'Not available yet');
+      console.log('📧 User email:', currentUser?.email || 'Loading...');
       
       // Debug: Check what auth tokens we have
       const authKeys = Object.keys(localStorage).filter(key => 
@@ -165,53 +165,51 @@ const MemberDashboard = () => {
       // If API fails, try direct Supabase query as fallback
       if (memberError || !memberData) {
         console.log('🔄 API lookup failed, trying direct Supabase query...');
-        console.log('API Error:', memberError);
+        if (memberError) {
+          console.log('API Error:', memberError);
+        }
         
         try {
           // Get current session for authenticated requests
           const { data: { session } } = await supabase.auth.getSession();
           
           if (session) {
-            // Try direct Supabase query by user_id
-            const { data: supabaseData, error: supabaseError } = await supabase
-              .from('members')
-              .select('*')
-              .eq('user_id', userId)
-              .single();
-              
-            if (!supabaseError && supabaseData) {
-              memberData = supabaseData;
-              console.log('✅ Found member via direct Supabase query (user_id)');
-            } else {
-              console.log('🔍 User ID lookup failed, trying email lookup...');
-              
-              // Try by email if user_id lookup fails and we have an email
-              const userEmail = currentUser?.email || session.user?.email;
-              if (userEmail) {
-                const { data: emailData, error: emailError } = await supabase
-                  .from('members')
-                  .select('*')
-                  .ilike('email', userEmail) // Use ilike for case-insensitive match
-                  .single();
-                  
-                if (!emailError && emailData) {
-                  memberData = emailData;
-                  console.log('✅ Found member via direct Supabase query (email)');
-                  
-                  // Update the member record to link it with the current user
+            // Skip user_id lookup if it's causing 406 errors and go straight to email
+            const userEmail = currentUser?.email || session.user?.email;
+            if (userEmail) {
+              console.log('🔍 Trying email lookup for:', userEmail);
+              const { data: emailData, error: emailError } = await supabase
+                .from('members')
+                .select('*')
+                .ilike('email', userEmail) // Use ilike for case-insensitive match
+                .single();
+                
+              if (!emailError && emailData) {
+                memberData = emailData;
+                console.log('✅ Found member via direct Supabase query (email)');
+                
+                // Only try to update user_id if it's not already set and avoid conflicts
+                if (!emailData.user_id || emailData.user_id !== userId) {
                   try {
-                    await supabase
+                    const { error: updateError } = await supabase
                       .from('members')
                       .update({ user_id: userId })
                       .eq('id', emailData.id);
-                    console.log('✅ Updated member record with user ID');
+                      
+                    if (!updateError) {
+                      console.log('✅ Updated member record with user ID');
+                    } else {
+                      console.log('ℹ️ Could not update user_id (member already linked or conflict):', updateError.message);
+                    }
                   } catch (updateError) {
-                    console.warn('⚠️ Could not update member record:', updateError);
+                    console.log('ℹ️ User ID update skipped due to conflict - member already linked');
                   }
-                } else {
-                  console.log('❌ Email lookup also failed:', emailError);
                 }
+              } else {
+                console.log('❌ Email lookup also failed:', emailError);
               }
+            } else {
+              console.log('❌ No email available for lookup');
             }
           } else {
             console.error('❌ No valid session for Supabase queries');
