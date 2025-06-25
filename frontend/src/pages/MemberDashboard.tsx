@@ -27,7 +27,13 @@ const MemberDashboard = () => {
 
   useEffect(() => {
     console.log('🔄 Initializing member dashboard...');
-    initializeDashboard();
+    
+    // Add a small delay to ensure auth system is fully initialized
+    const initTimer = setTimeout(() => {
+      initializeDashboard();
+    }, 100);
+    
+    return () => clearTimeout(initTimer);
   }, []);
 
   const initializeDashboard = async () => {
@@ -50,7 +56,10 @@ const MemberDashboard = () => {
         return;
       }
 
-      console.log('✅ Authenticated user found:', user.id);
+      console.log('✅ Authenticated user found:', {
+        id: user.id,
+        email: user.email || 'No email'
+      });
       setCurrentUser(user);
 
       // Get verification status from localStorage
@@ -63,20 +72,35 @@ const MemberDashboard = () => {
         }
       }
 
-      // Store user session for API calls if not already present
+      // Ensure auth session is available for API calls
       try {
-        const existingSession = localStorage.getItem('user_session');
-        if (!existingSession && user.session) {
-          localStorage.setItem('user_session', JSON.stringify({
-            access_token: user.session.access_token,
+        // Check if we have a valid Supabase session
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        
+        if (session?.access_token) {
+          console.log('🔐 Valid Supabase session found, storing for API calls');
+          
+          // Store the session data in a format the API can use
+          const authData = {
+            access_token: session.access_token,
             user_id: user.id,
-            email: user.email
-          }));
-          console.log('🔐 Stored user session for API calls');
+            email: user.email,
+            session_token: session.access_token
+          };
+          
+          localStorage.setItem('user_session', JSON.stringify(authData));
+          localStorage.setItem('access_token', JSON.stringify(authData));
+          
+          console.log('🔐 Auth session stored for API calls');
+        } else {
+          console.warn('⚠️ No valid session found');
         }
       } catch (sessionError) {
-        console.warn('⚠️ Could not store user session:', sessionError);
+        console.warn('⚠️ Could not get/store session:', sessionError);
       }
+
+      // Small delay to ensure auth is properly set up
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       // Fetch member data using the authenticated user's ID
       await fetchMemberData(user.id);
@@ -126,58 +150,83 @@ const MemberDashboard = () => {
   const fetchMemberData = async (userId: string) => {
     try {
       console.log('🔍 Fetching member data for user:', userId);
+      console.log('📧 User email:', currentUser?.email || 'Not available yet');
+      
+      // Debug: Check what auth tokens we have
+      const authKeys = Object.keys(localStorage).filter(key => 
+        key.includes('auth') || key.includes('session') || key.includes('token')
+      );
+      console.log('🔐 Available auth keys:', authKeys);
       
       // First, try to get member by user ID using API
+      console.log('🔄 Trying API lookup...');
       let { data: memberData, error: memberError } = await db.members.getByUserId(userId);
       
       // If API fails, try direct Supabase query as fallback
       if (memberError || !memberData) {
         console.log('🔄 API lookup failed, trying direct Supabase query...');
+        console.log('API Error:', memberError);
         
         try {
-          // Try direct Supabase query by user_id
-          const { data: supabaseData, error: supabaseError } = await supabase
-            .from('members')
-            .select('*')
-            .eq('user_id', userId)
-            .single();
-            
-          if (!supabaseError && supabaseData) {
-            memberData = supabaseData;
-            console.log('✅ Found member via direct Supabase query (user_id)');
-          } else if (currentUser?.email) {
-            // Try by email if user_id lookup fails
-            const { data: emailData, error: emailError } = await supabase
+          // Get current session for authenticated requests
+          const { data: { session } } = await supabase.auth.getSession();
+          
+          if (session) {
+            // Try direct Supabase query by user_id
+            const { data: supabaseData, error: supabaseError } = await supabase
               .from('members')
               .select('*')
-              .eq('email', currentUser.email)
+              .eq('user_id', userId)
               .single();
               
-            if (!emailError && emailData) {
-              memberData = emailData;
-              console.log('✅ Found member via direct Supabase query (email)');
+            if (!supabaseError && supabaseData) {
+              memberData = supabaseData;
+              console.log('✅ Found member via direct Supabase query (user_id)');
+            } else {
+              console.log('🔍 User ID lookup failed, trying email lookup...');
               
-              // Update the member record to link it with the current user
-              try {
-                await supabase
+              // Try by email if user_id lookup fails and we have an email
+              const userEmail = currentUser?.email || session.user?.email;
+              if (userEmail) {
+                const { data: emailData, error: emailError } = await supabase
                   .from('members')
-                  .update({ user_id: userId })
-                  .eq('id', emailData.id);
-                console.log('✅ Updated member record with user ID');
-              } catch (updateError) {
-                console.warn('⚠️ Could not update member record:', updateError);
+                  .select('*')
+                  .ilike('email', userEmail) // Use ilike for case-insensitive match
+                  .single();
+                  
+                if (!emailError && emailData) {
+                  memberData = emailData;
+                  console.log('✅ Found member via direct Supabase query (email)');
+                  
+                  // Update the member record to link it with the current user
+                  try {
+                    await supabase
+                      .from('members')
+                      .update({ user_id: userId })
+                      .eq('id', emailData.id);
+                    console.log('✅ Updated member record with user ID');
+                  } catch (updateError) {
+                    console.warn('⚠️ Could not update member record:', updateError);
+                  }
+                } else {
+                  console.log('❌ Email lookup also failed:', emailError);
+                }
               }
             }
+          } else {
+            console.error('❌ No valid session for Supabase queries');
           }
         } catch (directError) {
-          console.error('❌ Direct Supabase query also failed:', directError);
+          console.error('❌ Direct Supabase query failed:', directError);
         }
       }
       
       if (!memberData) {
-        console.log('❌ No member record found for user:', userId, 'or email:', currentUser?.email);
+        const userEmail = currentUser?.email || 'Unknown email';
+        console.log('❌ No member record found for user:', userId, 'or email:', userEmail);
+        
         setAuthError(
-          `No membership found for your account (${currentUser?.email || 'Unknown email'}). 
+          `No membership found for your account (${userEmail}). 
           
           This could mean:
           • Your membership hasn't been set up yet
@@ -247,13 +296,20 @@ const MemberDashboard = () => {
   };
 
   const refreshData = async () => {
-    if (!currentUser) {
-      await initializeDashboard();
-      return;
-    }
+    console.log('🔄 Refreshing member dashboard data...');
     
     setLoading(true);
-    await fetchMemberData(currentUser.id);
+    setAuthError('');
+    
+    // Clear any stale session data
+    localStorage.removeItem('user_session');
+    localStorage.removeItem('access_token');
+    
+    // Wait a bit for any pending auth operations
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    // Re-initialize everything
+    await initializeDashboard();
   };
 
   const handleMemberUpdate = (updatedMember: Member) => {
@@ -304,6 +360,11 @@ const MemberDashboard = () => {
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
             <p className="text-xl mb-2">Loading your dashboard...</p>
             <p className="text-gray-300">Authenticating and fetching your membership data</p>
+            <div className="mt-4 text-sm text-gray-400">
+              <p>• Verifying authentication</p>
+              <p>• Setting up API access</p>
+              <p>• Loading membership details</p>
+            </div>
           </div>
         </section>
       </div>
@@ -370,6 +431,9 @@ const MemberDashboard = () => {
               <div className="mt-8 p-4 bg-white/10 rounded-lg backdrop-blur-sm">
                 <p className="text-sm text-gray-300">
                   <strong>Logged in as:</strong> {currentUser.email}
+                </p>
+                <p className="text-xs text-gray-400 mt-1">
+                  User ID: {currentUser.id}
                 </p>
                 <p className="text-xs text-gray-400 mt-1">
                   If this email should have a membership, please contact support with this information.
