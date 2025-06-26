@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
   Mail, Phone, MapPin, User, CreditCard, Calendar, Shield, 
-  Package, UserPlus, Search, X, Users, Check, CheckCircle, Copy
+  Package, UserPlus, Search, X, Users, Check, CheckCircle, Copy, AlertTriangle
 } from 'lucide-react';
 import { db, getAuthHeaders } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
@@ -71,91 +71,34 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
   });
 
   useEffect(() => {
-    if (open) {
+    if (open && branchId) {
       fetchPackages();
       fetchStaff();
-      fetchExistingMembers();
+      // Don't fetch existing members immediately - only when needed
     }
   }, [open, branchId]);
 
+  // Fetch existing members when couple/family package is selected
   useEffect(() => {
-    if (selectedPackage) {
-      // FIXED: Safe property handling
-      const safeDuration = selectedPackage.duration_months || 1;
-      const safePrice = selectedPackage.price || 0;
-      
-      setPaymentInfo(prev => ({
-        ...prev,
-        duration: safeDuration,
-        price: safePrice
-      }));
-      initializeMemberForms();
+    if (selectedPackage && selectedPackage.max_members > 1 && existingMembers.length === 0) {
+      fetchExistingMembers();
     }
   }, [selectedPackage]);
 
-  // FIXED: Updated API endpoint and added authentication
-  const fetchPackages = async () => {
-    try {
-      // FIXED: Use correct endpoint with authentication
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/branch/${branchId}`, {
-        headers: getAuthHeaders()
-      });
-      const result = await response.json();
+  useEffect(() => {
+    if (selectedPackage) {
+      const safeDuration = selectedPackage.duration_months || 1;
+      const safePrice = selectedPackage.price || 0;
       
-      if (result.status === 'success') {
-        // Filter to only show active packages
-        const activePackages = (result.data || []).filter((pkg: PackageType) => pkg.is_active);
-        setPackages(activePackages);
-      } else {
-        throw new Error(result.error || 'Failed to fetch packages');
-      }
-    } catch (error) {
-      console.error('Error fetching branch packages:', error);
-      toast({
-        title: "Error",
-        description: "Failed to load packages for this branch",
-        variant: "destructive",
+      setPaymentInfo({
+        duration: safeDuration,
+        price: safePrice,
+        paymentMethod: ''
       });
-      setPackages([]);
-    }
-  };
-
-  const fetchStaff = async () => {
-    try {
-      const { data } = await db.staff.getByBranch(branchId);
-      if (data) setStaff(data);
-    } catch (error) {
-      console.error('Error fetching staff:', error);
-    }
-  };
-
-  const fetchExistingMembers = async () => {
-    try {
-      setSearchingMembers(true);
-      const { data } = await db.members.getByBranch(branchId);
-      if (data) {
-        const activeMembers = data.filter(member => {
-          const now = new Date();
-          const expiryDate = new Date(member.expiry_date);
-          return member.status === 'active' && expiryDate > now;
-        });
-        setExistingMembers(activeMembers);
-      }
-    } catch (error) {
-      console.error('Error fetching existing members:', error);
-    } finally {
-      setSearchingMembers(false);
-    }
-  };
-
-  const initializeMemberForms = () => {
-    if (!selectedPackage) return;
-
-    const memberCount = getMemberCountForPackage(selectedPackage.type);
-    const initialForms: MemberFormData[] = [];
-
-    for (let i = 0; i < memberCount; i++) {
-      initialForms.push({
+      
+      // Initialize member forms based on package type
+      const memberCount = selectedPackage.max_members || 1;
+      const initialForms: MemberFormData[] = Array.from({ length: memberCount }, () => ({
         isExisting: false,
         firstName: '',
         lastName: '',
@@ -165,43 +108,149 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
         emergencyContact: '',
         emergencyPhone: '',
         nationalId: ''
+      }));
+      
+      setMemberForms(initialForms);
+      setCurrentMemberIndex(0);
+      setSelectedExistingMembers([]);
+    }
+  }, [selectedPackage]);
+
+  const fetchPackages = async () => {
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/branch/${branchId}`, {
+        headers: getAuthHeaders()
       });
-    }
-
-    setMemberForms(initialForms);
-    setCurrentMemberIndex(0);
-    setSelectedExistingMembers([]);
-  };
-
-  const getMemberCountForPackage = (packageType: string): number => {
-    switch (packageType) {
-      case 'individual': return 1;
-      case 'couple': return 2;
-      case 'family': return 4;
-      default: return 1;
+      
+      if (response.ok) {
+        const data = await response.json();
+        setPackages(data.data || []);
+      }
+    } catch (error) {
+      console.error('Error fetching packages:', error);
     }
   };
 
-  const getPackageTypeLabel = (packageType: string): string => {
-    switch (packageType) {
-      case 'individual': return 'Individual (1 Member)';
-      case 'couple': return 'Couple (2 Members)';
-      case 'family': return 'Family (Up to 4 Members)';
-      default: return packageType.charAt(0).toUpperCase() + packageType.slice(1);
+  const fetchStaff = async () => {
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/staff/branch/${branchId}`, {
+        headers: getAuthHeaders()
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setStaff(data.data || []);
+      }
+    } catch (error) {
+      console.error('Error fetching staff:', error);
     }
   };
 
-  const filteredExistingMembers = existingMembers.filter(member => {
-    const searchLower = existingMemberSearch.toLowerCase();
-    const matchesSearch = (
-      member.first_name.toLowerCase().includes(searchLower) ||
-      member.last_name.toLowerCase().includes(searchLower) ||
-      member.email.toLowerCase().includes(searchLower) ||
-      member.phone.includes(existingMemberSearch)
-    );
+  const fetchExistingMembers = async () => {
+    // Validate branchId before making request
+    if (!branchId || branchId.trim() === '') {
+      console.warn('Cannot fetch existing members: branchId is missing');
+      return;
+    }
+
+    setSearchingMembers(true);
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/members/search`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
+        },
+        body: JSON.stringify({
+          branchId: branchId.trim(),
+          searchTerm: '',
+          statusFilter: 'all' // Include all members, including expired ones
+        })
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setExistingMembers(data.data || []);
+      } else {
+        // Log the actual error for debugging
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('Failed to fetch existing members:', response.status, errorData);
+        
+        // Don't show error toast for this background operation
+        // Just set empty array and continue
+        setExistingMembers([]);
+      }
+    } catch (error) {
+      console.error('Error fetching existing members:', error);
+      // Set empty array on error so the component still works
+      setExistingMembers([]);
+    } finally {
+      setSearchingMembers(false);
+    }
+  };
+
+  // Get expired members for couple/family packages
+  const getExpiredMembers = () => {
+    const now = new Date();
+    return existingMembers.filter(member => {
+      const expiryDate = new Date(member.expiry_date);
+      return expiryDate < now || member.status === 'expired';
+    });
+  };
+
+  const getFilteredExistingMembers = () => {
+    // For couple/family packages, always show expired members first
+    if (selectedPackage && selectedPackage.max_members > 1) {
+      const expiredMembers = getExpiredMembers();
+      
+      if (!existingMemberSearch.trim()) {
+        return expiredMembers.slice(0, 10); // Show expired members by default
+      }
+      
+      // If searching, filter expired members + search all members
+      const searchLower = existingMemberSearch.toLowerCase();
+      const allFilteredMembers = existingMembers.filter(member => {
+        const fullName = `${member.first_name} ${member.last_name}`.toLowerCase();
+        const matchesSearch = fullName.includes(searchLower) || 
+                             member.email.toLowerCase().includes(searchLower) ||
+                             (member.phone && member.phone.includes(existingMemberSearch));
+        
+        const isNotSelected = !selectedExistingMembers.some(selected => selected.id === member.id);
+        return matchesSearch && isNotSelected;
+      });
+      
+      return allFilteredMembers.slice(0, 10);
+    }
     
-    return matchesSearch && !selectedExistingMembers.some(selected => selected.id === member.id);
-  });
+    // For individual packages, use normal search behavior
+    if (!existingMemberSearch.trim()) return [];
+    
+    return existingMembers.filter(member => {
+      const searchLower = existingMemberSearch.toLowerCase();
+      const fullName = `${member.first_name} ${member.last_name}`.toLowerCase();
+      const matchesSearch = fullName.includes(searchLower) || 
+                           member.email.toLowerCase().includes(searchLower) ||
+                           (member.phone && member.phone.includes(existingMemberSearch));
+      
+      // Don't show already selected members
+      const isNotSelected = !selectedExistingMembers.some(selected => selected.id === member.id);
+      
+      return matchesSearch && isNotSelected;
+    }).slice(0, 10); // Limit results for better UX
+  };
+
+  const getMemberStatus = (member: Member) => {
+    const now = new Date();
+    const expiryDate = new Date(member.expiry_date);
+    
+    if (member.status === 'suspended') return { status: 'suspended', color: 'yellow' };
+    if (expiryDate < now) return { status: 'expired', color: 'red' };
+    return { status: 'active', color: 'green' };
+  };
+
+  const currentMember = memberForms[currentMemberIndex];
+  const totalMembers = selectedPackage?.max_members || 1;
+  const filteredExistingMembers = getFilteredExistingMembers();
 
   const updateMemberForm = (updates: Partial<MemberFormData>) => {
     setMemberForms(prev => prev.map((form, index) => 
@@ -209,7 +258,6 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
     ));
   };
 
-  // FIXED: Safe property access for member properties
   const selectExistingMember = (member: Member) => {
     const updatedForms = [...memberForms];
     updatedForms[currentMemberIndex] = {
@@ -266,113 +314,35 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
   };
 
   const handleSubmit = async () => {
-    if (!selectedPackage || !verification.staffId || !verification.pin) {
-      toast({
-        title: "Validation Error",
-        description: "Please complete all required fields",
-        variant: "destructive"
-      });
-      return;
-    }
-
     setLoading(true);
     try {
-      // Verify staff PIN first
-      const { isValid } = await db.staff.verifyPin(verification.staffId, verification.pin);
-      
-      if (!isValid) {
-        toast({
-          title: "Invalid PIN",
-          description: "The entered PIN is incorrect",
-          variant: "destructive"
-        });
-        return;
-      }
-
-      const startDate = new Date();
-      const expiryDate = new Date();
-      expiryDate.setMonth(expiryDate.getMonth() + paymentInfo.duration);
-
-      const accounts = [];
-
-      // Process each member
-      for (let i = 0; i < memberForms.length; i++) {
-        const memberForm = memberForms[i];
-        
-        if (memberForm.isExisting && memberForm.id) {
-          // Update existing member
-          const updateData = {
-            status: 'active' as const,
-            package_type: selectedPackage!.type,
-            package_name: selectedPackage!.name,
-            package_price: paymentInfo.price,
-            start_date: startDate.toISOString().split('T')[0],
-            expiry_date: expiryDate.toISOString().split('T')[0],
-            processed_by_staff_id: verification.staffId,
-            updated_at: new Date().toISOString()
-          };
-
-          const { error } = await db.members.update(memberForm.id, updateData);
-          if (error) throw error;
-        } else {
-          // Create new member with automatic account creation
-          const memberData = {
-            branch_id: branchId,
-            first_name: memberForm.firstName,
-            last_name: memberForm.lastName,
-            email: memberForm.email,
-            phone: memberForm.phone,
-            national_id: memberForm.nationalId,
-            status: 'active' as const,
-            package_type: selectedPackage!.type,
-            package_name: selectedPackage!.name,
-            package_price: paymentInfo.price,
-            start_date: startDate.toISOString().split('T')[0],
-            expiry_date: expiryDate.toISOString().split('T')[0],
-            is_verified: false,
-            is_existing_member: false,
-            processed_by_staff_id: verification.staffId,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          };
-
-          const { error, data } = await db.members.create(memberData);
-          if (error) throw error;
-          
-          // Store account info for display
-          if (data && data.account) {
-            accounts.push({
-              member: memberForm,
-              account: data.account
-            });
-          }
-        }
-      }
-
-      // Log the action via API
-      const logResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/action-logs`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/members/create-multiple`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
+        },
         body: JSON.stringify({
-          staff_id: verification.staffId,
-          action_type: 'MEMBER_ADDED',
-          description: `Added ${memberForms.length} member(s) with ${selectedPackage!.name} package`,
-          created_at: new Date().toISOString()
-        }),
+          branchId,
+          packageId: selectedPackage?.id,
+          members: memberForms,
+          paymentInfo,
+          staffVerification: verification
+        })
       });
 
-      // Log action creation is not critical, so don't fail if it errors
-      if (!logResponse.ok) {
-        console.warn('Failed to create action log, but member creation was successful');
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to create members');
       }
 
-      setCreatedAccounts(accounts);
+      const result = await response.json();
+      setCreatedAccounts(result.data.accounts || []);
       setCurrentStep('success');
 
-      const memberNames = memberForms.map(m => `${m.firstName} ${m.lastName}`).join(', ');
       toast({
-        title: "Members Added",
-        description: `${memberNames} ${memberForms.length > 1 ? 'have' : 'has'} been successfully added with login accounts`
+        title: "Success! 🎉",
+        description: `${memberForms.length} member${memberForms.length > 1 ? 's' : ''} ${memberForms.length > 1 ? 'have' : 'has'} been successfully added with login accounts`
       });
 
       onMemberAdded();
@@ -394,6 +364,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
     setMemberForms([]);
     setCurrentMemberIndex(0);
     setSelectedExistingMembers([]);
+    setExistingMembers([]); // Clear existing members cache
     setPaymentInfo({ duration: 1, price: 0, paymentMethod: '' });
     setVerification({ staffId: '', pin: '' });
     setExistingMemberSearch('');
@@ -404,7 +375,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
     switch (currentStep) {
       case 'package':
         return (
-          <div className="space-y-4">
+          <div className="space-y-6">
             <div className="text-center mb-6">
               <Package className="h-12 w-12 mx-auto mb-4 text-primary" />
               <h3 className="text-lg font-semibold">Select Membership Package</h3>
@@ -417,47 +388,66 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                 <p className="text-muted-foreground">Loading available packages...</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-96 overflow-y-auto">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-h-[400px] overflow-y-auto p-2">
                 {packages.map((pkg) => (
                   <Card 
                     key={pkg.id} 
-                    className={`cursor-pointer transition-colors ${
+                    className={`cursor-pointer transition-all duration-200 ${
                       selectedPackage?.id === pkg.id 
-                        ? 'border-primary bg-primary/5' 
-                        : 'border-border hover:border-primary/50'
+                        ? 'border-primary bg-primary/5 ring-2 ring-primary/20 shadow-lg' 
+                        : 'border-border hover:border-primary/50 hover:shadow-md'
                     }`}
                     onClick={() => setSelectedPackage(pkg)}
                   >
-                    <CardHeader className="pb-2">
+                    <CardHeader className="pb-3">
                       <div className="flex items-center justify-between">
                         <CardTitle className="text-lg">{pkg.name}</CardTitle>
-                        <Badge variant={pkg.type === 'couple' ? 'secondary' : pkg.type === 'family' ? 'default' : 'outline'}>
-                          {getPackageTypeLabel(pkg.type)}
+                        <Badge 
+                          variant={pkg.type === 'couple' ? 'secondary' : pkg.type === 'family' ? 'default' : 'outline'}
+                          className="capitalize"
+                        >
+                          {pkg.type}
                         </Badge>
                       </div>
                     </CardHeader>
-                    <CardContent>
-                      <div className="space-y-2">
-                        {/* FIXED: Safe price display */}
-                        <p className="text-2xl font-bold text-primary">${pkg.price || 'N/A'}</p>
-                        {/* FIXED: Safe duration display */}
-                        <p className="text-sm text-muted-foreground">{pkg.duration_months || 1} month(s)</p>
-                        <div className="space-y-1">
-                          {/* FIXED: Safe features display */}
-                          {pkg.features && pkg.features.slice(0, 3).map((feature, index) => (
-                            <p key={index} className="text-xs text-muted-foreground">• {feature}</p>
-                          ))}
-                          {pkg.features && pkg.features.length > 3 && (
-                            <p className="text-xs text-muted-foreground">• +{pkg.features.length - 3} more features</p>
-                          )}
-                        </div>
-                        {selectedPackage?.id === pkg.id && (
-                          <div className="flex items-center gap-1 text-primary pt-2">
-                            <Check className="h-4 w-4" />
-                            <span className="text-sm font-medium">Selected</span>
-                          </div>
-                        )}
+                    <CardContent className="space-y-3">
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-2xl font-bold text-primary">${pkg.price}</span>
+                        <span className="text-sm text-muted-foreground">
+                          /{pkg.duration_months} {pkg.duration_months === 1 ? 'month' : 'months'}
+                        </span>
                       </div>
+                      
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Users className="h-4 w-4" />
+                        <span>Up to {pkg.max_members} member{pkg.max_members > 1 ? 's' : ''}</span>
+                      </div>
+                      
+                      {pkg.features && pkg.features.length > 0 && (
+                        <div className="space-y-1">
+                          <p className="text-sm font-medium">Features:</p>
+                          <ul className="text-xs text-muted-foreground space-y-1">
+                            {pkg.features.slice(0, 3).map((feature, index) => (
+                              <li key={index} className="flex items-center gap-1">
+                                <Check className="h-3 w-3 text-green-500" />
+                                {feature}
+                              </li>
+                            ))}
+                            {pkg.features.length > 3 && (
+                              <li className="text-xs text-muted-foreground">
+                                +{pkg.features.length - 3} more features
+                              </li>
+                            )}
+                          </ul>
+                        </div>
+                      )}
+                      
+                      {selectedPackage?.id === pkg.id && (
+                        <div className="flex items-center gap-2 text-sm text-primary font-medium">
+                          <CheckCircle className="h-4 w-4" />
+                          Selected
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 ))}
@@ -467,13 +457,9 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
         );
 
       case 'members':
-        if (!selectedPackage || memberForms.length === 0) return null;
-        
-        const currentMember = memberForms[currentMemberIndex];
-        const totalMembers = memberForms.length;
-        const memberLabel = selectedPackage.type === 'couple' 
+        const memberLabel = selectedPackage?.type === 'couple' 
           ? (currentMemberIndex === 0 ? 'Partner 1' : 'Partner 2')
-          : selectedPackage.type === 'family'
+          : selectedPackage?.type === 'family'
           ? `Family Member ${currentMemberIndex + 1}`
           : 'Member';
 
@@ -487,14 +473,46 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
               <p className="text-muted-foreground">Enter member information or select existing member</p>
             </div>
 
-            <Tabs defaultValue="new" className="w-full">
+            {/* Member Navigation */}
+            {totalMembers > 1 && (
+              <div className="flex justify-center gap-2 mb-6">
+                {Array.from({ length: totalMembers }).map((_, index) => (
+                  <Button
+                    key={index}
+                    variant={index === currentMemberIndex ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setCurrentMemberIndex(index)}
+                    className="w-10 h-10 rounded-full"
+                  >
+                    {index + 1}
+                  </Button>
+                ))}
+              </div>
+            )}
+
+            <Tabs defaultValue={selectedPackage?.max_members > 1 ? "existing" : "new"} className="w-full">
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="new">New Member</TabsTrigger>
-                <TabsTrigger value="existing">Existing Member</TabsTrigger>
+                <TabsTrigger 
+                  value="existing"
+                  onClick={() => {
+                    // Fetch existing members when tab is clicked (if not already fetched)
+                    if (existingMembers.length === 0 && !searchingMembers) {
+                      fetchExistingMembers();
+                    }
+                  }}
+                >
+                  Existing Member
+                  {selectedPackage?.max_members > 1 && (
+                    <Badge variant="secondary" className="ml-2 text-xs">
+                      {getExpiredMembers().length} expired
+                    </Badge>
+                  )}
+                </TabsTrigger>
               </TabsList>
               
-              <TabsContent value="new" className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <TabsContent value="new" className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <Label htmlFor="firstName">First Name *</Label>
                     <Input
@@ -502,6 +520,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                       value={currentMember?.firstName || ''}
                       onChange={(e) => updateMemberForm({ firstName: e.target.value })}
                       placeholder="Enter first name"
+                      className="mt-1"
                     />
                   </div>
                   <div>
@@ -511,11 +530,12 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                       value={currentMember?.lastName || ''}
                       onChange={(e) => updateMemberForm({ lastName: e.target.value })}
                       placeholder="Enter last name"
+                      className="mt-1"
                     />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <Label htmlFor="email">Email *</Label>
                     <Input
@@ -524,6 +544,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                       value={currentMember?.email || ''}
                       onChange={(e) => updateMemberForm({ email: e.target.value })}
                       placeholder="Enter email address"
+                      className="mt-1"
                     />
                   </div>
                   <div>
@@ -533,31 +554,35 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                       value={currentMember?.phone || ''}
                       onChange={(e) => updateMemberForm({ phone: e.target.value })}
                       placeholder="Enter phone number"
+                      className="mt-1"
                     />
                   </div>
                 </div>
 
-                <div>
-                  <Label htmlFor="nationalId">National ID *</Label>
-                  <Input
-                    id="nationalId"
-                    value={currentMember?.nationalId || ''}
-                    onChange={(e) => updateMemberForm({ nationalId: e.target.value })}
-                    placeholder="Enter national ID number"
-                  />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <Label htmlFor="nationalId">National ID *</Label>
+                    <Input
+                      id="nationalId"
+                      value={currentMember?.nationalId || ''}
+                      onChange={(e) => updateMemberForm({ nationalId: e.target.value })}
+                      placeholder="Enter national ID"
+                      className="mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="address">Address</Label>
+                    <Input
+                      id="address"
+                      value={currentMember?.address || ''}
+                      onChange={(e) => updateMemberForm({ address: e.target.value })}
+                      placeholder="Enter address"
+                      className="mt-1"
+                    />
+                  </div>
                 </div>
 
-                <div>
-                  <Label htmlFor="address">Address</Label>
-                  <Input
-                    id="address"
-                    value={currentMember?.address || ''}
-                    onChange={(e) => updateMemberForm({ address: e.target.value })}
-                    placeholder="Enter address"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <Label htmlFor="emergencyContact">Emergency Contact</Label>
                     <Input
@@ -565,6 +590,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                       value={currentMember?.emergencyContact || ''}
                       onChange={(e) => updateMemberForm({ emergencyContact: e.target.value })}
                       placeholder="Emergency contact name"
+                      className="mt-1"
                     />
                   </div>
                   <div>
@@ -574,64 +600,176 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                       value={currentMember?.emergencyPhone || ''}
                       onChange={(e) => updateMemberForm({ emergencyPhone: e.target.value })}
                       placeholder="Emergency contact phone"
+                      className="mt-1"
                     />
                   </div>
                 </div>
               </TabsContent>
 
-              <TabsContent value="existing" className="space-y-4">
+              <TabsContent value="existing" className="space-y-6">
+                {/* Show expired members notice for couple/family packages */}
+                {selectedPackage?.max_members > 1 && getExpiredMembers().length > 0 && (
+                  <Card className="bg-orange-50 border-orange-200">
+                    <CardContent className="p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <AlertTriangle className="h-5 w-5 text-orange-600" />
+                        <h4 className="font-medium text-orange-800">Expired Members Available</h4>
+                      </div>
+                      <p className="text-sm text-orange-700">
+                        {getExpiredMembers().length} expired member{getExpiredMembers().length !== 1 ? 's' : ''} can be added to this {selectedPackage.type} package.
+                        You can select them below to renew their membership.
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
+
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
                   <Input
                     className="pl-10"
-                    placeholder="Search existing members..."
+                    placeholder={selectedPackage?.max_members > 1 ? "Search members or view expired members below..." : "Search by name, email, or phone..."}
                     value={existingMemberSearch}
                     onChange={(e) => setExistingMemberSearch(e.target.value)}
                   />
                 </div>
 
                 {selectedExistingMembers.length > 0 && (
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     <Label>Selected Members:</Label>
-                    {selectedExistingMembers.map((member) => (
-                      <div key={member.id} className="flex items-center justify-between p-2 bg-muted rounded">
-                        <span>{member.first_name} {member.last_name}</span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removeSelectedMember(member.id)}
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {existingMemberSearch && (
-                  <div className="max-h-64 overflow-y-auto space-y-2">
-                    {searchingMembers ? (
-                      <div className="text-center py-4">
-                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto mb-2"></div>
-                        <p className="text-sm text-muted-foreground">Searching members...</p>
-                      </div>
-                    ) : filteredExistingMembers.length > 0 ? (
-                      filteredExistingMembers.map((member) => (
-                        <Card key={member.id} className="cursor-pointer hover:bg-muted/50" onClick={() => selectExistingMember(member)}>
-                          <CardContent className="p-3">
-                            <div className="flex items-center justify-between">
+                    <div className="space-y-2 max-h-40 overflow-y-auto">
+                      {selectedExistingMembers.map((member) => {
+                        const memberStatus = getMemberStatus(member);
+                        return (
+                          <div key={member.id} className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                            <div className="flex items-center gap-3">
                               <div>
                                 <p className="font-medium">{member.first_name} {member.last_name}</p>
                                 <p className="text-sm text-muted-foreground">{member.email}</p>
                               </div>
-                              <Badge variant="outline">{member.status}</Badge>
+                              <Badge 
+                                variant="outline" 
+                                className={`text-xs ${
+                                  memberStatus.color === 'green' ? 'border-green-500 text-green-700' :
+                                  memberStatus.color === 'red' ? 'border-red-500 text-red-700' :
+                                  'border-yellow-500 text-yellow-700'
+                                }`}
+                              >
+                                {memberStatus.status}
+                              </Badge>
                             </div>
-                          </CardContent>
-                        </Card>
-                      ))
-                    ) : (
-                      <p className="text-center text-muted-foreground py-4">No members found</p>
-                    )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => removeSelectedMember(member.id)}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Show available members */}
+                <div className="max-h-64 overflow-y-auto space-y-2">
+                  {searchingMembers ? (
+                    <div className="text-center py-8">
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto mb-2"></div>
+                      <p className="text-sm text-muted-foreground">Searching members...</p>
+                    </div>
+                  ) : filteredExistingMembers.length > 0 ? (
+                    <>
+                      {/* Show section header for couple/family packages */}
+                      {selectedPackage?.max_members > 1 && !existingMemberSearch && (
+                        <div className="mb-3">
+                          <Label className="text-sm font-medium text-muted-foreground">
+                            Expired Members Available for Renewal:
+                          </Label>
+                        </div>
+                      )}
+                      {filteredExistingMembers.map((member) => {
+                        const memberStatus = getMemberStatus(member);
+                        return (
+                          <Card 
+                            key={member.id} 
+                            className={`cursor-pointer transition-colors ${
+                              memberStatus.status === 'expired' 
+                                ? 'hover:bg-red-50 border-red-200' 
+                                : 'hover:bg-muted/50'
+                            }`}
+                            onClick={() => selectExistingMember(member)}
+                          >
+                            <CardContent className="p-4">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                  <div>
+                                    <p className="font-medium">{member.first_name} {member.last_name}</p>
+                                    <p className="text-sm text-muted-foreground">{member.email}</p>
+                                    <p className="text-xs text-muted-foreground">{member.phone}</p>
+                                    {memberStatus.status === 'expired' && (
+                                      <p className="text-xs text-red-600 mt-1">
+                                        Expired {Math.abs(Math.ceil((new Date(member.expiry_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)))} days ago
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Badge 
+                                    variant="outline" 
+                                    className={`text-xs ${
+                                      memberStatus.color === 'green' ? 'border-green-500 text-green-700' :
+                                      memberStatus.color === 'red' ? 'border-red-500 text-red-700 bg-red-50' :
+                                      'border-yellow-500 text-yellow-700'
+                                    }`}
+                                  >
+                                    {memberStatus.status}
+                                  </Badge>
+                                  {memberStatus.status === 'expired' && (
+                                    <AlertTriangle className="h-4 w-4 text-red-500" />
+                                  )}
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        );
+                      })}
+                    </>
+                  ) : (
+                    <div className="text-center py-8">
+                      <Users className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                      <p className="text-sm text-muted-foreground">
+                        {selectedPackage?.max_members > 1 && !existingMemberSearch 
+                          ? "No expired members found" 
+                          : "No members found"
+                        }
+                      </p>
+                    </div>
+                  )}
+                </div>
+                
+                {/* Show search instruction for individual packages */}
+                {selectedPackage?.max_members === 1 && !existingMemberSearch && existingMembers.length === 0 && !searchingMembers && (
+                  <div className="text-center py-8">
+                    <Search className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground mb-3">Search for existing members</p>
+                    <p className="text-xs text-muted-foreground mb-4">Including expired members who can be renewed</p>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={fetchExistingMembers}
+                    >
+                      Load Members
+                    </Button>
+                  </div>
+                )}
+
+                {/* Show search instruction when members are loaded */}
+                {selectedPackage?.max_members === 1 && !existingMemberSearch && existingMembers.length > 0 && (
+                  <div className="text-center py-8">
+                    <Search className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">Start typing to search for existing members</p>
+                    <p className="text-xs text-muted-foreground mt-1">Including expired members who can be renewed</p>
                   </div>
                 )}
               </TabsContent>
@@ -645,21 +783,46 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
             <div className="text-center mb-6">
               <CreditCard className="h-12 w-12 mx-auto mb-4 text-primary" />
               <h3 className="text-lg font-semibold">Payment Information</h3>
-              <p className="text-muted-foreground">Configure membership duration and payment details</p>
+              <p className="text-muted-foreground">Configure payment details for the membership</p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Package Summary</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <Label className="text-sm font-medium">Package</Label>
+                    <p className="text-sm text-muted-foreground">{selectedPackage?.name}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium">Members</Label>
+                    <p className="text-sm text-muted-foreground">{memberForms.length} member{memberForms.length > 1 ? 's' : ''}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium">Duration</Label>
+                    <p className="text-sm text-muted-foreground">{paymentInfo.duration} month{paymentInfo.duration > 1 ? 's' : ''}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <Label htmlFor="duration">Duration (months)</Label>
+                <Label htmlFor="duration">Duration (Months) *</Label>
                 <Input
                   id="duration"
                   type="number"
+                  min="1"
+                  max="24"
                   value={paymentInfo.duration}
                   onChange={(e) => setPaymentInfo(prev => ({ ...prev, duration: parseInt(e.target.value) || 1 }))}
+                  className="mt-1"
                 />
               </div>
               <div>
-                <Label htmlFor="price">Price ($)</Label>
+                <Label htmlFor="price">Total Amount *</Label>
                 <Input
                   id="price"
                   type="number"
@@ -667,40 +830,25 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                   step="0.01"
                   value={paymentInfo.price}
                   onChange={(e) => setPaymentInfo(prev => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
+                  className="mt-1"
                 />
               </div>
             </div>
+
             <div>
               <Label htmlFor="paymentMethod">Payment Method *</Label>
               <Select value={paymentInfo.paymentMethod} onValueChange={(value) => setPaymentInfo(prev => ({ ...prev, paymentMethod: value }))}>
-                <SelectTrigger>
+                <SelectTrigger className="mt-1">
                   <SelectValue placeholder="Select payment method" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="card">
-                    <div className="flex items-center gap-2">
-                      <CreditCard className="h-4 w-4" />
-                      Credit/Debit Card
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="cash">Cash Payment</SelectItem>
+                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="card">Credit/Debit Card</SelectItem>
+                  <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                  <SelectItem value="digital_wallet">Digital Wallet</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            {selectedPackage && (
-              <Card className="bg-muted/50">
-                <CardContent className="p-4">
-                  <h4 className="font-medium mb-2">Package Summary</h4>
-                  <div className="space-y-1 text-sm">
-                    <p><span className="text-muted-foreground">Package:</span> {selectedPackage.name}</p>
-                    <p><span className="text-muted-foreground">Type:</span> {getPackageTypeLabel(selectedPackage.type)}</p>
-                    <p><span className="text-muted-foreground">Members:</span> {memberForms.length}</p>
-                    <p><span className="text-muted-foreground">Duration:</span> {paymentInfo.duration} month{paymentInfo.duration > 1 ? 's' : ''}</p>
-                    <p><span className="text-muted-foreground">Total Price:</span> ${paymentInfo.price}</p>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
           </div>
         );
 
@@ -710,102 +858,81 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
             <div className="text-center mb-6">
               <Shield className="h-12 w-12 mx-auto mb-4 text-primary" />
               <h3 className="text-lg font-semibold">Staff Verification</h3>
-              <p className="text-muted-foreground">Verify staff authorization for member registration</p>
+              <p className="text-muted-foreground">Verify your identity to complete the registration</p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <Label htmlFor="staff">Authorizing Staff *</Label>
+                <Label htmlFor="staffId">Staff Member *</Label>
                 <Select value={verification.staffId} onValueChange={(value) => setVerification(prev => ({ ...prev, staffId: value }))}>
-                  <SelectTrigger>
+                  <SelectTrigger className="mt-1">
                     <SelectValue placeholder="Select staff member" />
                   </SelectTrigger>
                   <SelectContent>
-                    {staff.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.first_name} {s.last_name} ({s.role})
+                    {staff.map((staffMember) => (
+                      <SelectItem key={staffMember.id} value={staffMember.id}>
+                        {staffMember.first_name} {staffMember.last_name} ({staffMember.role})
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div>
-                <Label htmlFor="pin">Staff PIN *</Label>
+                <Label htmlFor="pin">Security PIN *</Label>
                 <Input
                   id="pin"
                   type="password"
-                  placeholder="Enter 4-digit PIN"
                   value={verification.pin}
                   onChange={(e) => setVerification(prev => ({ ...prev, pin: e.target.value }))}
-                  maxLength={4}
+                  placeholder="Enter your security PIN"
+                  maxLength={6}
+                  className="mt-1"
                 />
               </div>
             </div>
-
-            {/* Final Summary */}
-            <Card className="bg-primary/5 border-primary/20">
-              <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2">
-                  <CheckCircle className="h-4 w-4" />
-                  Registration Summary
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div>
-                  <p className="text-sm font-medium">Package: {selectedPackage?.name}</p>
-                  <p className="text-sm text-muted-foreground">Type: {getPackageTypeLabel(selectedPackage?.type || '')}</p>
-                </div>
-                <div>
-                  <p className="text-sm font-medium">Members ({memberForms.length}):</p>
-                  {memberForms.map((member, index) => (
-                    <p key={index} className="text-sm text-muted-foreground">
-                      • {member.firstName} {member.lastName} {member.isExisting ? '(Existing)' : '(New)'}
-                    </p>
-                  ))}
-                </div>
-                <div>
-                  <p className="text-sm font-medium">Duration: {paymentInfo.duration} month{paymentInfo.duration > 1 ? 's' : ''}</p>
-                  <p className="text-sm font-medium">Total: ${paymentInfo.price}</p>
-                  <p className="text-sm font-medium">Payment: {paymentInfo.paymentMethod}</p>
-                </div>
-              </CardContent>
-            </Card>
           </div>
         );
 
       case 'success':
         return (
-          <div className="space-y-6 text-center">
+          <div className="text-center space-y-6">
+            <CheckCircle className="h-16 w-16 mx-auto text-green-500" />
             <div>
-              <CheckCircle className="h-16 w-16 mx-auto mb-4 text-green-500" />
-              <h3 className="text-lg font-semibold text-green-700">Members Successfully Added!</h3>
-              <p className="text-muted-foreground">All members have been registered and their accounts are ready</p>
+              <h3 className="text-xl font-semibold text-green-700">Success!</h3>
+              <p className="text-muted-foreground mt-2">
+                {memberForms.length} member{memberForms.length > 1 ? 's have' : ' has'} been successfully added
+              </p>
             </div>
 
             {createdAccounts.length > 0 && (
-              <Card>
+              <Card className="text-left">
                 <CardHeader>
-                  <CardTitle className="text-base">New Account Details</CardTitle>
+                  <CardTitle className="text-base">Login Accounts Created</CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Please share these credentials with the members
+                  </p>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {createdAccounts.map((account, index) => (
-                    <div key={index} className="p-3 bg-muted rounded-lg space-y-2">
-                      <p className="font-medium">{account.member.firstName} {account.member.lastName}</p>
-                      <div className="grid grid-cols-2 gap-2 text-sm">
-                        <p><span className="text-muted-foreground">Email:</span> {account.account.email}</p>
-                        <p><span className="text-muted-foreground">Password:</span> {account.account.password}</p>
+                    <div key={index} className="p-4 bg-muted rounded-lg">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="font-medium">{account.memberName}</p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            navigator.clipboard.writeText(`Email: ${account.email}\nPassword: ${account.password}`);
+                            toast({ title: "Copied to clipboard!" });
+                          }}
+                        >
+                          <Copy className="h-4 w-4 mr-2" />
+                          Copy Details
+                        </Button>
                       </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          navigator.clipboard.writeText(`Email: ${account.account.email}\nPassword: ${account.account.password}`);
-                          toast({ title: "Copied to clipboard!" });
-                        }}
-                      >
-                        <Copy className="h-4 w-4 mr-2" />
-                        Copy Details
-                      </Button>
+                      <div className="space-y-1 text-sm">
+                        <p><strong>Email:</strong> {account.email}</p>
+                        <p><strong>Password:</strong> {account.password}</p>
+                      </div>
                     </div>
                   ))}
                 </CardContent>
@@ -897,7 +1024,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
       if (!isOpen) resetForm();
       onOpenChange(isOpen);
     }}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Add New Member - Step {getStepNumber()} of {getTotalSteps()}</DialogTitle>
           <p className="text-muted-foreground">{getStepTitle()}</p>
@@ -922,7 +1049,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
           {renderStepContent()}
 
           {currentStep !== 'success' && (
-            <div className="flex gap-2 pt-4">
+            <div className="flex gap-3 pt-6 border-t">
               <Button 
                 variant="outline" 
                 onClick={handleBack} 
@@ -937,17 +1064,25 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                   disabled={loading || !canProceed()} 
                   className="flex-1"
                 >
-                  {loading ? 'Creating Members & Accounts...' : 'Create Members'}
+                  {loading ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                      Creating Members...
+                    </>
+                  ) : (
+                    'Create Members'
+                  )}
                 </Button>
-              ) : currentStep === 'members' ? (
-                <div className="flex-1" />
               ) : (
                 <Button 
                   onClick={handleNext} 
                   disabled={!canProceed()} 
                   className="flex-1"
                 >
-                  Next
+                  {currentStep === 'members' && currentMemberIndex < memberForms.length - 1 
+                    ? `Next Member (${currentMemberIndex + 2}/${memberForms.length})`
+                    : 'Next'
+                  }
                 </Button>
               )}
             </div>
