@@ -1,10 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Get environment variables with fallbacks
+// =============================================================================
+// CONFIGURATION - UNCHANGED FROM YOUR VERSION
+// =============================================================================
+
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://rjznvhjitbbvitnvdgfo.supabase.co';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJqem52aGppdGJidml0bnZkZ2ZvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzY3Mzg3MDQsImV4cCI6MjA1MjMxNDcwNH0.example-anon-key';
 
-// Only validate in production
 if (import.meta.env.PROD && (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY)) {
   console.warn(
     'Missing Supabase environment variables. Using fallback values for development.\n' +
@@ -16,14 +18,16 @@ if (import.meta.env.PROD && (!import.meta.env.VITE_SUPABASE_URL || !import.meta.
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-// Enhanced session token management
+// =============================================================================
+// SESSION MANAGEMENT - ENHANCED VERSION FROM YOUR CODE
+// =============================================================================
+
 let staffSessionToken: string | null = null;
 
 export const setStaffSessionToken = (token: string | null) => {
   staffSessionToken = token;
   if (token) {
     localStorage.setItem('staff_session_token', token);
-    // Store expiry time (24 hours from now)
     const expiry = Date.now() + (24 * 60 * 60 * 1000);
     localStorage.setItem('staff_session_expiry', expiry.toString());
     console.log('✅ Session token stored with expiry:', new Date(expiry));
@@ -55,7 +59,6 @@ export const getStaffSessionToken = () => {
   return staffSessionToken;
 };
 
-// Check if user is authenticated
 export const isAuthenticated = (): boolean => {
   const sessionToken = getStaffSessionToken();
   const branchSession = localStorage.getItem('branch_session');
@@ -81,7 +84,6 @@ export const isAuthenticated = (): boolean => {
   return false;
 };
 
-// Helper to get auth headers - FIXED VERSION
 export const getAuthHeaders = () => {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -133,7 +135,10 @@ export const getAuthHeaders = () => {
   return headers;
 };
 
-// Enhanced auth helpers
+// =============================================================================
+// AUTH HELPERS - COMPLETE VERSION FROM YOUR CODE
+// =============================================================================
+
 export const auth = {
   // Sign in with email/password
   signIn: async (email: string, password: string) => {
@@ -179,7 +184,7 @@ export const auth = {
     }
   },
 
-  // Get current user
+  // Get current user - RESTORED
   getCurrentUser: async () => {
     try {
       const { data: { user }, error } = await supabase.auth.getUser();
@@ -190,7 +195,7 @@ export const auth = {
     }
   },
 
-  // Reset password
+  // Reset password - RESTORED
   resetPassword: async (email: string) => {
     try {
       const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
@@ -203,9 +208,7 @@ export const auth = {
     }
   },
 
-  // NEW METHODS FOR MEMBER SETTINGS:
-
-  // Update user email
+  // Update user email - RESTORED
   updateEmail: async (newEmail: string) => {
     try {
       const { data, error } = await supabase.auth.updateUser({
@@ -218,7 +221,7 @@ export const auth = {
     }
   },
 
-  // Update user profile data
+  // Update user profile data - RESTORED
   updateProfile: async (updates: any) => {
     try {
       const { data, error } = await supabase.auth.updateUser({
@@ -231,7 +234,7 @@ export const auth = {
     }
   },
 
-  // Check if email confirmation is required
+  // Check if email confirmation is required - RESTORED
   checkEmailConfirmation: async () => {
     try {
       const { data: { user }, error } = await supabase.auth.getUser();
@@ -248,7 +251,7 @@ export const auth = {
     }
   },
 
-  // Resend email confirmation
+  // Resend email confirmation - RESTORED
   resendEmailConfirmation: async () => {
     try {
       const { error } = await supabase.auth.resend({
@@ -263,9 +266,12 @@ export const auth = {
   },
 };
 
-// Enhanced database helpers
+// =============================================================================
+// DATABASE HELPERS - COMPLETE VERSION WITH BACKEND API INTEGRATION
+// =============================================================================
+
 export const db = {
-  // Staff operations - UPDATED TO USE BACKEND API WITH SESSION
+  // Staff operations - BACKEND API INTEGRATION + RESTORED FUNCTIONS
   staff: {
     getByBranch: async (branchId: string) => {
       try {
@@ -322,6 +328,7 @@ export const db = {
       }
     },
 
+    // RESTORED - Staff getAll function
     getAll: async () => {
       try {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
@@ -437,7 +444,7 @@ export const db = {
     delete: (id: string) => supabase.from('branches').delete().eq('id', id),
   },
 
-  // Members - UPDATED TO USE BACKEND API WITH SESSION
+  // Members - BACKEND API INTEGRATION (UPDATED)
   members: {
     getByBranch: async (branchId: string) => {
       try {
@@ -604,7 +611,7 @@ export const db = {
     },
   },
 
-  // Packages - UPDATED TO USE BACKEND API WITH SESSION
+  // Packages - BACKEND API INTEGRATION (UPDATED)
   packages: {
     getActive: async () => {
       try {
@@ -729,7 +736,7 @@ export const db = {
     },
   },
 
-  // Partnerships - UNCHANGED
+  // RESTORED - Partnerships table (unchanged from your version)
   partnerships: {
     getAll: () => supabase.from('partnerships').select('*').order('name'),
     getActive: () => supabase.from('partnerships').select('*').eq('is_active', true).order('name'),
@@ -739,7 +746,7 @@ export const db = {
     delete: (id: string) => supabase.from('partnerships').delete().eq('id', id),
   },
 
-  // Gym Staff - UNCHANGED
+  // RESTORED - Gym Staff table (unchanged from your version)
   gymStaff: {
     getDisplayed: () => supabase.from('gym_staff').select('*').eq('is_displayed', true).order('name'),
     getAll: () => supabase.from('gym_staff').select('*').order('name'),
@@ -765,12 +772,35 @@ export const db = {
     getAll: () => supabase.from('member_check_ins').select('*, branches(name), members(first_name, last_name)').order('created_at', { ascending: false }),
   },
 
-  // Renewals - UNCHANGED
+  // Renewals - BACKEND API INTEGRATION
   renewals: {
+    // Keep all your existing functions unchanged:
     create: (renewal: any) => supabase.from('member_renewals').insert(renewal).select().single(),
     getByMemberId: (memberId: string) => 
       supabase.from('member_renewals').select('*').eq('member_id', memberId).order('created_at', { ascending: false }),
     getAll: () => supabase.from('member_renewals').select('*, members(first_name, last_name), packages(name)').order('created_at', { ascending: false }),
+    
+    // ✅ ADD THIS PROCESS FUNCTION (this is what's missing):
+    process: async (renewalData: any) => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+        const response = await fetch(`${API_BASE_URL}/renewals/process`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify(renewalData),
+        });
+
+        const result = await response.json();
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to process renewal');
+        }
+
+        return { data: result.data, error: null };
+      } catch (error) {
+        console.error('Error processing renewal:', error);
+        return { data: null, error: error instanceof Error ? error : new Error('Unknown error') };
+      }
+    },
   },
 
   // Reports - UNCHANGED
@@ -798,8 +828,9 @@ export const db = {
     getAll: () => supabase.from('staff_actions_log').select('*, branch_staff(first_name, last_name), members(first_name, last_name)').order('created_at', { ascending: false }),
   },
 
-  // Analytics - UPDATED TO USE SESSION
+  // Analytics - RESTORED AND ENHANCED
   analytics: {
+    // RESTORED - Your original getBranchAnalytics function
     getBranchAnalytics: async (branchId: string, startDate?: string, endDate?: string) => {
       try {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
@@ -840,5 +871,28 @@ export const db = {
     create: (user: any) => supabase.from('users').insert(user).select().single(),
     update: (id: string, updates: any) => supabase.from('users').update(updates).eq('id', id).select().single(),
     getAll: () => supabase.from('users').select('*').order('created_at', { ascending: false }),
+  },
+
+  // Health Check - API Health Endpoint
+  health: {
+    check: async () => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+        const response = await fetch(`${API_BASE_URL}/health`);
+        const result = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(result.error || 'Health check failed');
+        }
+        
+        return { data: result, error: null };
+      } catch (error) {
+        console.error('Error in health check:', error);
+        return { 
+          data: null, 
+          error: error instanceof Error ? error : new Error('Unknown error')
+        };
+      }
+    },
   },
 };

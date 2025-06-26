@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 
+
 // Components
 import Navbar from "@/components/Navbar";
 
@@ -15,6 +16,7 @@ import Branches from "./pages/Branches";
 import Partnerships from "./pages/Partnerships";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
+import TestPinVerification from './pages/TestPinVerification';
 
 // Protected Pages
 import StaffDashboard from "./pages/StaffDashboard";
@@ -45,6 +47,7 @@ const App = () => (
               <Route path="/partnerships" element={<Partnerships />} />
               <Route path="/login" element={<Login />} />
               <Route path="/404" element={<NotFound />} />
+              <Route path="/test-pin" element={<TestPinVerification />} />
 
               {/* 🔐 PROTECTED ROUTES (Temporary - work with your current auth) */}
               
