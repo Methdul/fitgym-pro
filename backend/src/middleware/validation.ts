@@ -367,8 +367,8 @@ export const commonValidations = {
     validateName('lastName'), 
     validateEmail('email'),
     validatePhone('phone'),
-    validateUUID('branchId'),
-    validateUUID('packageId'),
+    validateUUIDInBody('branchId'),    // ← Use the new function
+    validateUUIDInBody('packageId'), 
     handleValidationErrors
   ],
   
