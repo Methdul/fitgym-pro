@@ -1,4 +1,4 @@
-// backend/src/routes/renewals.ts - COMPLETE WITH DEBUG ROUTES
+// backend/src/routes/renewals.ts - COMPLETE WITH DEBUG ROUTES AND SCHEMA FIXES
 import express, { Request, Response, NextFunction } from 'express';
 import { supabase } from '../lib/supabase';
 import { authenticate, optionalAuth } from '../middleware/auth';
@@ -59,7 +59,7 @@ interface EdgeFunctionResponse {
   error?: string;
 }
 
-// PHASE 1 SECURITY FIXES: Renewal processing validation
+// PHASE 1 SECURITY FIXES: Renewal processing validation - UPDATED FOR CORRECT PAYMENT METHODS
 const renewalProcessValidation = [
   // Validate UUIDs
   require('express-validator').body('memberId')
@@ -72,10 +72,10 @@ const renewalProcessValidation = [
     .isUUID()
     .withMessage('staffId must be a valid UUID'),
   
-  // Validate payment method
+  // ✅ FIXED: Validate payment method - only allow values that exist in your enum
   require('express-validator').body('paymentMethod')
-    .isIn(['cash', 'card', 'transfer', 'cheque'])
-    .withMessage('paymentMethod must be one of: cash, card, transfer, cheque'),
+    .isIn(['cash', 'card'])
+    .withMessage('paymentMethod must be one of: cash, card'),
   
   // Validate amount
   require('express-validator').body('amountPaid')
@@ -304,7 +304,7 @@ router.post('/debug/process-no-auth',
 // REGULAR ROUTES (WITH ORIGINAL AUTHENTICATION)
 // ====================================================================
 
-// Process a member renewal - PHASE 1 SECURITY FIXES APPLIED
+// Process a member renewal - PHASE 1 SECURITY FIXES APPLIED + SCHEMA FIXES
 router.post('/process', 
   authRateLimit,                               // PHASE 1 FIX: PIN brute force protection
   renewalProcessValidation,                    // PHASE 1 FIX: Input validation
@@ -325,7 +325,7 @@ router.post('/process',
         additionalMembers = []
       } = req.body;
 
-      console.log('🔄 Processing member renewal with enhanced security');
+      console.log('🔄 Processing member renewal with enhanced security and correct schema');
 
       // Step 1: PHASE 1 FIX - Enhanced staff verification with unified PIN logic
       const { data: renewalStaff, error: renewalStaffError } = await supabase
@@ -487,19 +487,25 @@ router.post('/process',
         });
       }
 
-      // Step 6: Create renewal record
+      // ✅ Step 6: Create renewal record - FIXED TO MATCH YOUR TABLE SCHEMA
+      console.log('🔍 Creating renewal record with corrected schema...');
+      console.log('Member expiry date:', member.expiry_date);
+      console.log('New expiry date calculation:', newExpiryDate.toISOString());
+      
       const renewalData = {
         member_id: memberId,
         package_id: packageId,
         renewed_by_staff_id: staffId,
-        payment_method: paymentMethod,
+        payment_method: paymentMethod, // Now only 'cash' or 'card'
         amount_paid: parseFloat(amountPaid),
-        duration_months: parseInt(durationMonths),
-        previous_expiry_date: member.expiry_date,
-        new_expiry_date: newExpiryDate.toISOString(),
-        additional_members: additionalMembers,
-        created_at: new Date().toISOString()
+        // ✅ FIXED: Use correct column names and date format (not timestamp)
+        previous_expiry: member.expiry_date, // Keep as-is if already date format
+        new_expiry: newExpiryDate.toISOString().split('T')[0] // Convert to YYYY-MM-DD
+        // ✅ REMOVED: duration_months and additional_members (columns don't exist in your table)
+        // created_at will use table default (NOW())
       };
+
+      console.log('🔍 Renewal data to insert:', JSON.stringify(renewalData, null, 2));
 
       const { data: renewal, error: renewalError } = await supabase
         .from('member_renewals')
@@ -508,21 +514,37 @@ router.post('/process',
         .single();
 
       if (renewalError) {
-        console.error('Renewal creation error:', renewalError);
+        console.error('🚨 RENEWAL INSERT ERROR:');
+        console.error('Code:', renewalError.code);
+        console.error('Message:', renewalError.message);
+        console.error('Details:', renewalError.details);
+        console.error('Hint:', renewalError.hint);
+        
         return res.status(500).json({
           status: 'error',
-          error: 'Failed to create renewal record'
+          error: 'Failed to create renewal record',
+          details: renewalError.message,
+          debug: {
+            code: renewalError.code,
+            insertData: renewalData
+          }
         });
       }
 
-      // Step 7: Update member status and expiry
+      console.log('✅ Renewal record created successfully:', renewal.id);
+
+      // ✅ Step 7: Update member status and expiry - ALSO CORRECTED
+      const memberUpdateData = {
+        expiry_date: newExpiryDate.toISOString().split('T')[0], // Date format, not timestamp
+        status: 'active',
+        updated_at: new Date().toISOString()
+      };
+
+      console.log('🔍 Updating member with:', memberUpdateData);
+
       const { error: updateError } = await supabase
         .from('members')
-        .update({
-          expiry_date: newExpiryDate.toISOString(),
-          status: 'active',
-          updated_at: new Date().toISOString()
-        })
+        .update(memberUpdateData)
         .eq('id', memberId);
 
       if (updateError) {
@@ -533,18 +555,24 @@ router.post('/process',
         });
       }
 
-      // Step 8: Log the renewal action
-      await supabase
-        .from('staff_actions_log')
-        .insert({
-          staff_id: staffId,
-          action_type: 'MEMBER_RENEWAL',
-          description: `Renewed membership for ${member.first_name} ${member.last_name} - ${renewalPackage.name} for ${durationMonths} months`,
-          member_id: memberId,
-          created_at: new Date().toISOString()
-        });
+      // Step 8: Log the action (with graceful error handling)
+      try {
+        await supabase
+          .from('staff_actions_log')
+          .insert({
+            staff_id: staffId,
+            action_type: 'MEMBER_RENEWAL',
+            description: `Renewed membership for ${member.first_name} ${member.last_name} - ${renewalPackage.name} for ${durationMonths} months`,
+            member_id: memberId,
+            created_at: new Date().toISOString()
+          });
+        console.log('✅ Action logged successfully');
+      } catch (logError) {
+        console.warn('⚠️ Failed to log action (continuing anyway):', logError);
+        // Don't fail the renewal just because logging failed
+      }
 
-      console.log('✅ Member renewal processed successfully');
+      console.log('✅ Member renewal completed successfully');
 
       res.json({
         status: 'success',
@@ -552,7 +580,7 @@ router.post('/process',
           renewal,
           member: {
             ...member,
-            expiry_date: newExpiryDate.toISOString(),
+            expiry_date: newExpiryDate.toISOString().split('T')[0],
             status: 'active'
           },
           package: renewalPackage,
@@ -585,45 +613,41 @@ router.get('/branch/:branchId',
   async (req: Request, res: Response) => {
     try {
       const { branchId } = req.params;
-      const { limit = 50, offset = 0, period = '30' } = req.query;
-
+      const { limit = 50, offset = 0 } = req.query;
+      
+      const limitNum = Math.min(parseInt(limit as string) || 50, 100);
+      const offsetNum = Math.max(parseInt(offset as string) || 0, 0);
+      
       console.log(`📋 Getting renewals for branch: ${branchId}`);
-
-      // Calculate date range
-      const daysAgo = parseInt(period as string);
-      const fromDate = new Date();
-      fromDate.setDate(fromDate.getDate() - daysAgo);
-
+      
       const { data, error } = await supabase
         .from('member_renewals')
         .select(`
           *,
-          members!member_renewals_member_id_fkey(first_name, last_name, email, national_id),
-          packages!member_renewals_package_id_fkey(name, price, type),
-          branch_staff!member_renewals_renewed_by_staff_id_fkey(first_name, last_name, role)
+          members(first_name, last_name, email),
+          packages(name, type, price),
+          branch_staff(first_name, last_name, role)
         `)
         .eq('members.branch_id', branchId)
-        .gte('created_at', fromDate.toISOString())
         .order('created_at', { ascending: false })
-        .range(parseInt(offset as string), parseInt(offset as string) + parseInt(limit as string) - 1);
-
+        .range(offsetNum, offsetNum + limitNum - 1);
+      
       if (error) {
         console.error('Database error:', error);
-        throw error;
+        throw new Error('Failed to fetch renewals');
       }
-
+      
       console.log(`✅ Found ${data?.length || 0} renewals`);
-
-      res.json({
-        status: 'success',
+      
+      res.json({ 
+        status: 'success', 
         data: data || [],
         pagination: {
-          limit: parseInt(limit as string),
-          offset: parseInt(offset as string),
+          limit: limitNum,
+          offset: offsetNum,
           total: data?.length || 0
         }
       });
-
     } catch (error) {
       console.error('Error fetching renewals:', error);
       res.status(500).json({
@@ -634,4 +658,55 @@ router.get('/branch/:branchId',
   }
 );
 
+// Get renewal details by ID - RBAC PROTECTED
+router.get('/:renewalId',
+  authenticate,
+  requirePermission(Permission.RENEWALS_READ),
+  [validateUUID('renewalId'), handleValidationErrors],
+  auditLog('READ_RENEWAL_DETAILS', 'renewals'),
+  async (req: Request, res: Response) => {
+    try {
+      const { renewalId } = req.params;
+      
+      const { data, error } = await supabase
+        .from('member_renewals')
+        .select(`
+          *,
+          members(first_name, last_name, email, branch_id),
+          packages(name, type, price),
+          branch_staff(first_name, last_name, role)
+        `)
+        .eq('id', renewalId)
+        .single();
+      
+      if (error) {
+        console.error('Database error:', error);
+        throw new Error('Failed to fetch renewal');
+      }
+      
+      if (!data) {
+        return res.status(404).json({
+          status: 'error',
+          error: 'Renewal not found'
+        });
+      }
+      
+      res.json({ 
+        status: 'success', 
+        data 
+      });
+    } catch (error) {
+      console.error('Error fetching renewal:', error);
+      res.status(500).json({
+        status: 'error',
+        error: 'Failed to fetch renewal'
+      });
+    }
+  }
+);
+
+// Export router
 export default router;
+
+// Also export with the expected name for dynamic loading
+export { router as renewalRoutes };

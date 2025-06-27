@@ -6,14 +6,13 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
-  Mail, Phone, MapPin, User, CreditCard, Calendar, Shield, 
-  Package, UserPlus, Search, X, Users, Check, CheckCircle, Copy, AlertTriangle
+  UserPlus, Package as PackageIcon, User, CreditCard, Shield, CheckCircle, 
+  Search, X, Copy, Info, Users
 } from 'lucide-react';
-import { db, getAuthHeaders } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
-import type { Package as PackageType, BranchStaff, Member } from '@/types';
+import { getAuthHeaders } from '@/lib/supabase';
+import type { Member, Package as PackageType, BranchStaff } from '@/types';
 
 interface AddNewMemberModalProps {
   open: boolean;
@@ -85,20 +84,10 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
     }
   }, [selectedPackage]);
 
+  // Initialize member forms when package is selected
   useEffect(() => {
-    if (selectedPackage) {
-      const safeDuration = selectedPackage.duration_months || 1;
-      const safePrice = selectedPackage.price || 0;
-      
-      setPaymentInfo({
-        duration: safeDuration,
-        price: safePrice,
-        paymentMethod: ''
-      });
-      
-      // Initialize member forms based on package type
-      const memberCount = selectedPackage.max_members || 1;
-      const initialForms: MemberFormData[] = Array.from({ length: memberCount }, () => ({
+    if (selectedPackage && memberForms.length === 0) {
+      const forms = Array.from({ length: selectedPackage.max_members }, () => ({
         isExisting: false,
         firstName: '',
         lastName: '',
@@ -109,25 +98,29 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
         emergencyPhone: '',
         nationalId: ''
       }));
-      
-      setMemberForms(initialForms);
-      setCurrentMemberIndex(0);
-      setSelectedExistingMembers([]);
+      setMemberForms(forms);
     }
-  }, [selectedPackage]);
+  }, [selectedPackage, memberForms.length]);
 
   const fetchPackages = async () => {
     try {
       const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/branch/${branchId}`, {
         headers: getAuthHeaders()
       });
+      const result = await response.json();
       
       if (response.ok) {
-        const data = await response.json();
-        setPackages(data.data || []);
+        setPackages(result.data || []);
+      } else {
+        throw new Error(result.error || 'Failed to fetch packages');
       }
     } catch (error) {
       console.error('Error fetching packages:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load packages",
+        variant: "destructive"
+      });
     }
   };
 
@@ -136,10 +129,12 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
       const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/staff/branch/${branchId}`, {
         headers: getAuthHeaders()
       });
+      const result = await response.json();
       
       if (response.ok) {
-        const data = await response.json();
-        setStaff(data.data || []);
+        setStaff(result.data || []);
+      } else {
+        throw new Error(result.error || 'Failed to fetch staff');
       }
     } catch (error) {
       console.error('Error fetching staff:', error);
@@ -147,114 +142,40 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
   };
 
   const fetchExistingMembers = async () => {
-    // Validate branchId before making request
-    if (!branchId || branchId.trim() === '') {
-      console.warn('Cannot fetch existing members: branchId is missing');
-      return;
-    }
-
     setSearchingMembers(true);
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/members/search`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders()
-        },
-        body: JSON.stringify({
-          branchId: branchId.trim(),
-          searchTerm: '',
-          statusFilter: 'all' // Include all members, including expired ones
-        })
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/members/branch/${branchId}?limit=100`, {
+        headers: getAuthHeaders()
       });
+      const result = await response.json();
       
       if (response.ok) {
-        const data = await response.json();
-        setExistingMembers(data.data || []);
+        setExistingMembers(result.data || []);
       } else {
-        // Log the actual error for debugging
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        console.error('Failed to fetch existing members:', response.status, errorData);
-        
-        // Don't show error toast for this background operation
-        // Just set empty array and continue
-        setExistingMembers([]);
+        throw new Error(result.error || 'Failed to fetch members');
       }
     } catch (error) {
       console.error('Error fetching existing members:', error);
-      // Set empty array on error so the component still works
-      setExistingMembers([]);
     } finally {
       setSearchingMembers(false);
     }
   };
 
-  // Get expired members for couple/family packages
-  const getExpiredMembers = () => {
-    const now = new Date();
-    return existingMembers.filter(member => {
-      const expiryDate = new Date(member.expiry_date);
-      return expiryDate < now || member.status === 'expired';
-    });
+  const resetForm = () => {
+    setCurrentStep('package');
+    setSelectedPackage(null);
+    setMemberForms([]);
+    setCurrentMemberIndex(0);
+    setExistingMemberSearch('');
+    setSelectedExistingMembers([]);
+    setPaymentInfo({ duration: 1, price: 0, paymentMethod: '' });
+    setVerification({ staffId: '', pin: '' });
+    setCreatedAccounts([]);
   };
 
-  const getFilteredExistingMembers = () => {
-    // For couple/family packages, always show expired members first
-    if (selectedPackage && selectedPackage.max_members > 1) {
-      const expiredMembers = getExpiredMembers();
-      
-      if (!existingMemberSearch.trim()) {
-        return expiredMembers.slice(0, 10); // Show expired members by default
-      }
-      
-      // If searching, filter expired members + search all members
-      const searchLower = existingMemberSearch.toLowerCase();
-      const allFilteredMembers = existingMembers.filter(member => {
-        const fullName = `${member.first_name} ${member.last_name}`.toLowerCase();
-        const matchesSearch = fullName.includes(searchLower) || 
-                             member.email.toLowerCase().includes(searchLower) ||
-                             (member.phone && member.phone.includes(existingMemberSearch));
-        
-        const isNotSelected = !selectedExistingMembers.some(selected => selected.id === member.id);
-        return matchesSearch && isNotSelected;
-      });
-      
-      return allFilteredMembers.slice(0, 10);
-    }
-    
-    // For individual packages, use normal search behavior
-    if (!existingMemberSearch.trim()) return [];
-    
-    return existingMembers.filter(member => {
-      const searchLower = existingMemberSearch.toLowerCase();
-      const fullName = `${member.first_name} ${member.last_name}`.toLowerCase();
-      const matchesSearch = fullName.includes(searchLower) || 
-                           member.email.toLowerCase().includes(searchLower) ||
-                           (member.phone && member.phone.includes(existingMemberSearch));
-      
-      // Don't show already selected members
-      const isNotSelected = !selectedExistingMembers.some(selected => selected.id === member.id);
-      
-      return matchesSearch && isNotSelected;
-    }).slice(0, 10); // Limit results for better UX
-  };
-
-  const getMemberStatus = (member: Member) => {
-    const now = new Date();
-    const expiryDate = new Date(member.expiry_date);
-    
-    if (member.status === 'suspended') return { status: 'suspended', color: 'yellow' };
-    if (expiryDate < now) return { status: 'expired', color: 'red' };
-    return { status: 'active', color: 'green' };
-  };
-
-  const currentMember = memberForms[currentMemberIndex];
-  const totalMembers = selectedPackage?.max_members || 1;
-  const filteredExistingMembers = getFilteredExistingMembers();
-
-  const updateMemberForm = (updates: Partial<MemberFormData>) => {
-    setMemberForms(prev => prev.map((form, index) => 
-      index === currentMemberIndex ? { ...form, ...updates } : form
+  const updateMemberForm = (index: number, updates: Partial<MemberFormData>) => {
+    setMemberForms(prev => prev.map((form, i) => 
+      i === index ? { ...form, ...updates } : form
     ));
   };
 
@@ -313,22 +234,31 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
     return paymentInfo.duration > 0 && paymentInfo.price > 0 && paymentInfo.paymentMethod !== '';
   };
 
+  // ✅ FIXED: Updated handleSubmit to send correct data format
   const handleSubmit = async () => {
     setLoading(true);
     try {
+      // ✅ PHASE 3 FIX: Update payload structure to match backend expectations
+      const payload = {
+        branchId,
+        packageId: selectedPackage?.id,
+        members: memberForms,
+        paymentInfo,
+        // ✅ Keep staffVerification as nested object for members API
+        // This differs from renewals API which expects top-level fields
+        staffVerification: {
+          staffId: verification.staffId,
+          staffPin: verification.pin  // ✅ Renamed from 'pin' to 'staffPin' for consistency
+        }
+      };
+
       const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/members/create-multiple`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...getAuthHeaders()
         },
-        body: JSON.stringify({
-          branchId,
-          packageId: selectedPackage?.id,
-          members: memberForms,
-          paymentInfo,
-          staffVerification: verification
-        })
+        body: JSON.stringify(payload)
       });
 
       if (!response.ok) {
@@ -342,33 +272,21 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
 
       toast({
         title: "Success! 🎉",
-        description: `${memberForms.length} member${memberForms.length > 1 ? 's' : ''} ${memberForms.length > 1 ? 'have' : 'has'} been successfully added with login accounts`
+        description: `${memberForms.length} member${memberForms.length > 1 ? 's' : ''} ${memberForms.length > 1 ? 'have' : 'has'} been successfully created.`,
       });
 
       onMemberAdded();
+
     } catch (error) {
-      console.error('Error adding members:', error);
+      console.error('Error creating members:', error);
       toast({
-        title: "Error",
-        description: "Failed to add members",
+        title: "Member Creation Failed",
+        description: error instanceof Error ? error.message : "Failed to create members",
         variant: "destructive"
       });
     } finally {
       setLoading(false);
     }
-  };
-
-  const resetForm = () => {
-    setCurrentStep('package');
-    setSelectedPackage(null);
-    setMemberForms([]);
-    setCurrentMemberIndex(0);
-    setSelectedExistingMembers([]);
-    setExistingMembers([]); // Clear existing members cache
-    setPaymentInfo({ duration: 1, price: 0, paymentMethod: '' });
-    setVerification({ staffId: '', pin: '' });
-    setExistingMemberSearch('');
-    setCreatedAccounts([]);
   };
 
   const renderStepContent = () => {
@@ -377,403 +295,247 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
         return (
           <div className="space-y-6">
             <div className="text-center mb-6">
-              <Package className="h-12 w-12 mx-auto mb-4 text-primary" />
+              <PackageIcon className="h-12 w-12 mx-auto mb-4 text-primary" />
               <h3 className="text-lg font-semibold">Select Membership Package</h3>
-              <p className="text-muted-foreground">Choose the package type and plan</p>
+              <p className="text-muted-foreground">Choose a package for the new member(s)</p>
             </div>
 
-            {packages.length === 0 ? (
-              <div className="text-center py-8">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-                <p className="text-muted-foreground">Loading available packages...</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-h-[400px] overflow-y-auto p-2">
-                {packages.map((pkg) => (
-                  <Card 
-                    key={pkg.id} 
-                    className={`cursor-pointer transition-all duration-200 ${
-                      selectedPackage?.id === pkg.id 
-                        ? 'border-primary bg-primary/5 ring-2 ring-primary/20 shadow-lg' 
-                        : 'border-border hover:border-primary/50 hover:shadow-md'
-                    }`}
-                    onClick={() => setSelectedPackage(pkg)}
-                  >
-                    <CardHeader className="pb-3">
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="text-lg">{pkg.name}</CardTitle>
-                        <Badge 
-                          variant={pkg.type === 'couple' ? 'secondary' : pkg.type === 'family' ? 'default' : 'outline'}
-                          className="capitalize"
-                        >
-                          {pkg.type}
-                        </Badge>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      <div className="flex items-baseline gap-2">
-                        <span className="text-2xl font-bold text-primary">${pkg.price}</span>
-                        <span className="text-sm text-muted-foreground">
-                          /{pkg.duration_months} {pkg.duration_months === 1 ? 'month' : 'months'}
-                        </span>
-                      </div>
-                      
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <Users className="h-4 w-4" />
-                        <span>Up to {pkg.max_members} member{pkg.max_members > 1 ? 's' : ''}</span>
-                      </div>
-                      
-                      {pkg.features && pkg.features.length > 0 && (
-                        <div className="space-y-1">
-                          <p className="text-sm font-medium">Features:</p>
-                          <ul className="text-xs text-muted-foreground space-y-1">
-                            {pkg.features.slice(0, 3).map((feature, index) => (
-                              <li key={index} className="flex items-center gap-1">
-                                <Check className="h-3 w-3 text-green-500" />
-                                {feature}
-                              </li>
-                            ))}
-                            {pkg.features.length > 3 && (
-                              <li className="text-xs text-muted-foreground">
-                                +{pkg.features.length - 3} more features
-                              </li>
-                            )}
-                          </ul>
-                        </div>
-                      )}
-                      
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {packages.map((pkg) => (
+                <Card 
+                  key={pkg.id} 
+                  className={`cursor-pointer transition-all hover:shadow-md ${
+                    selectedPackage?.id === pkg.id 
+                      ? 'ring-2 ring-primary bg-primary/5' 
+                      : 'hover:border-primary/50'
+                  }`}
+                  onClick={() => setSelectedPackage(pkg)}
+                >
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-base">{pkg.name}</CardTitle>
                       {selectedPackage?.id === pkg.id && (
-                        <div className="flex items-center gap-2 text-sm text-primary font-medium">
-                          <CheckCircle className="h-4 w-4" />
-                          Selected
-                        </div>
+                        <CheckCircle className="h-5 w-5 text-primary" />
                       )}
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
+                    </div>
+                    <Badge variant="outline" className="w-fit">
+                      {pkg.type} • Max {pkg.max_members} member{pkg.max_members > 1 ? 's' : ''}
+                    </Badge>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Price</span>
+                        <span className="font-semibold">${pkg.price}/month</span>
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        <ul className="space-y-1">
+                          {pkg.features?.slice(0, 2).map((feature, index) => (
+                            <li key={index}>• {feature}</li>
+                          ))}
+                          {pkg.features?.length > 2 && (
+                            <li>• +{pkg.features.length - 2} more features</li>
+                          )}
+                        </ul>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
           </div>
         );
 
       case 'members':
-        const memberLabel = selectedPackage?.type === 'couple' 
-          ? (currentMemberIndex === 0 ? 'Partner 1' : 'Partner 2')
-          : selectedPackage?.type === 'family'
-          ? `Family Member ${currentMemberIndex + 1}`
-          : 'Member';
-
+        const currentMember = memberForms[currentMemberIndex] || {
+          isExisting: false,
+          firstName: '',
+          lastName: '',
+          email: '',
+          phone: '',
+          address: '',
+          emergencyContact: '',
+          emergencyPhone: '',
+          nationalId: ''
+        };
         return (
           <div className="space-y-6">
             <div className="text-center mb-6">
               <User className="h-12 w-12 mx-auto mb-4 text-primary" />
               <h3 className="text-lg font-semibold">
-                Add {memberLabel} ({currentMemberIndex + 1} of {totalMembers})
+                Member {currentMemberIndex + 1} of {memberForms.length}
               </h3>
-              <p className="text-muted-foreground">Enter member information or select existing member</p>
+              <p className="text-muted-foreground">
+                {selectedPackage?.max_members === 1 
+                  ? "Enter member information" 
+                  : `Add information for member ${currentMemberIndex + 1}`
+                }
+              </p>
             </div>
 
-            {/* Member Navigation */}
-            {totalMembers > 1 && (
-              <div className="flex justify-center gap-2 mb-6">
-                {Array.from({ length: totalMembers }).map((_, index) => (
-                  <Button
-                    key={index}
-                    variant={index === currentMemberIndex ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setCurrentMemberIndex(index)}
-                    className="w-10 h-10 rounded-full"
-                  >
-                    {index + 1}
-                  </Button>
-                ))}
-              </div>
+            {/* Option to select existing member for couple/family packages */}
+            {selectedPackage && selectedPackage.max_members > 1 && (
+              <Card className="bg-blue-50 border-blue-200">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base text-blue-800 flex items-center gap-2">
+                    <Info className="h-4 w-4" />
+                    Add Existing Member (Optional)
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <p className="text-sm text-blue-700 mb-4">
+                    You can select an existing member or create a new one below.
+                  </p>
+                  
+                  <div className="space-y-3">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+                      <Input
+                        className="pl-10"
+                        placeholder="Search existing members..."
+                        value={existingMemberSearch}
+                        onChange={(e) => setExistingMemberSearch(e.target.value)}
+                      />
+                    </div>
+
+                    {existingMemberSearch && existingMembers.length > 0 && (
+                      <div className="space-y-2 max-h-32 overflow-y-auto">
+                        {existingMembers
+                          .filter(member => 
+                            (member.first_name.toLowerCase().includes(existingMemberSearch.toLowerCase()) ||
+                             member.last_name.toLowerCase().includes(existingMemberSearch.toLowerCase()) ||
+                             member.email.toLowerCase().includes(existingMemberSearch.toLowerCase())) &&
+                            !selectedExistingMembers.find(selected => selected.id === member.id)
+                          )
+                          .slice(0, 5)
+                          .map((member) => (
+                            <div
+                              key={member.id}
+                              className="flex items-center justify-between p-2 bg-white rounded border cursor-pointer hover:bg-gray-50"
+                              onClick={() => selectExistingMember(member)}
+                            >
+                              <div>
+                                <p className="text-sm font-medium">{member.first_name} {member.last_name}</p>
+                                <p className="text-xs text-muted-foreground">{member.email}</p>
+                              </div>
+                              <Button variant="ghost" size="sm" className="h-8 px-3">
+                                Select
+                              </Button>
+                            </div>
+                          ))
+                        }
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
             )}
 
-            <Tabs defaultValue={selectedPackage?.max_members > 1 ? "existing" : "new"} className="w-full">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="new">New Member</TabsTrigger>
-                <TabsTrigger 
-                  value="existing"
-                  onClick={() => {
-                    // Fetch existing members when tab is clicked (if not already fetched)
-                    if (existingMembers.length === 0 && !searchingMembers) {
-                      fetchExistingMembers();
-                    }
-                  }}
-                >
-                  Existing Member
-                  {selectedPackage?.max_members > 1 && (
-                    <Badge variant="secondary" className="ml-2 text-xs">
-                      {getExpiredMembers().length} expired
-                    </Badge>
-                  )}
-                </TabsTrigger>
-              </TabsList>
-              
-              <TabsContent value="new" className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <Label htmlFor="firstName">First Name *</Label>
-                    <Input
-                      id="firstName"
-                      value={currentMember?.firstName || ''}
-                      onChange={(e) => updateMemberForm({ firstName: e.target.value })}
-                      placeholder="Enter first name"
-                      className="mt-1"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="lastName">Last Name *</Label>
-                    <Input
-                      id="lastName"
-                      value={currentMember?.lastName || ''}
-                      onChange={(e) => updateMemberForm({ lastName: e.target.value })}
-                      placeholder="Enter last name"
-                      className="mt-1"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <Label htmlFor="email">Email *</Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      value={currentMember?.email || ''}
-                      onChange={(e) => updateMemberForm({ email: e.target.value })}
-                      placeholder="Enter email address"
-                      className="mt-1"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="phone">Phone *</Label>
-                    <Input
-                      id="phone"
-                      value={currentMember?.phone || ''}
-                      onChange={(e) => updateMemberForm({ phone: e.target.value })}
-                      placeholder="Enter phone number"
-                      className="mt-1"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <Label htmlFor="nationalId">National ID *</Label>
-                    <Input
-                      id="nationalId"
-                      value={currentMember?.nationalId || ''}
-                      onChange={(e) => updateMemberForm({ nationalId: e.target.value })}
-                      placeholder="Enter national ID"
-                      className="mt-1"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="address">Address</Label>
-                    <Input
-                      id="address"
-                      value={currentMember?.address || ''}
-                      onChange={(e) => updateMemberForm({ address: e.target.value })}
-                      placeholder="Enter address"
-                      className="mt-1"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <Label htmlFor="emergencyContact">Emergency Contact</Label>
-                    <Input
-                      id="emergencyContact"
-                      value={currentMember?.emergencyContact || ''}
-                      onChange={(e) => updateMemberForm({ emergencyContact: e.target.value })}
-                      placeholder="Emergency contact name"
-                      className="mt-1"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="emergencyPhone">Emergency Phone</Label>
-                    <Input
-                      id="emergencyPhone"
-                      value={currentMember?.emergencyPhone || ''}
-                      onChange={(e) => updateMemberForm({ emergencyPhone: e.target.value })}
-                      placeholder="Emergency contact phone"
-                      className="mt-1"
-                    />
-                  </div>
-                </div>
-              </TabsContent>
-
-              <TabsContent value="existing" className="space-y-6">
-                {/* Show expired members notice for couple/family packages */}
-                {selectedPackage?.max_members > 1 && getExpiredMembers().length > 0 && (
-                  <Card className="bg-orange-50 border-orange-200">
-                    <CardContent className="p-4">
-                      <div className="flex items-center gap-2 mb-2">
-                        <AlertTriangle className="h-5 w-5 text-orange-600" />
-                        <h4 className="font-medium text-orange-800">Expired Members Available</h4>
-                      </div>
-                      <p className="text-sm text-orange-700">
-                        {getExpiredMembers().length} expired member{getExpiredMembers().length !== 1 ? 's' : ''} can be added to this {selectedPackage.type} package.
-                        You can select them below to renew their membership.
-                      </p>
-                    </CardContent>
-                  </Card>
-                )}
-
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-                  <Input
-                    className="pl-10"
-                    placeholder={selectedPackage?.max_members > 1 ? "Search members or view expired members below..." : "Search by name, email, or phone..."}
-                    value={existingMemberSearch}
-                    onChange={(e) => setExistingMemberSearch(e.target.value)}
-                  />
-                </div>
-
-                {selectedExistingMembers.length > 0 && (
+            {/* Member form */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">
+                  {currentMember.isExisting ? 'Selected Member' : 'New Member Information'}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {currentMember.isExisting ? (
                   <div className="space-y-3">
-                    <Label>Selected Members:</Label>
-                    <div className="space-y-2 max-h-40 overflow-y-auto">
-                      {selectedExistingMembers.map((member) => {
-                        const memberStatus = getMemberStatus(member);
-                        return (
-                          <div key={member.id} className="flex items-center justify-between p-3 bg-muted rounded-lg">
-                            <div className="flex items-center gap-3">
-                              <div>
-                                <p className="font-medium">{member.first_name} {member.last_name}</p>
-                                <p className="text-sm text-muted-foreground">{member.email}</p>
-                              </div>
-                              <Badge 
-                                variant="outline" 
-                                className={`text-xs ${
-                                  memberStatus.color === 'green' ? 'border-green-500 text-green-700' :
-                                  memberStatus.color === 'red' ? 'border-red-500 text-red-700' :
-                                  'border-yellow-500 text-yellow-700'
-                                }`}
-                              >
-                                {memberStatus.status}
-                              </Badge>
-                            </div>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => removeSelectedMember(member.id)}
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        );
-                      })}
+                    <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg border border-green-200">
+                      <div>
+                        <p className="font-medium text-green-800">
+                          {currentMember.firstName} {currentMember.lastName}
+                        </p>
+                        <p className="text-sm text-green-600">{currentMember.email}</p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => removeSelectedMember(currentMember.id!)}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="firstName">First Name *</Label>
+                      <Input
+                        id="firstName"
+                        value={currentMember.firstName || ''}
+                        onChange={(e) => updateMemberForm(currentMemberIndex, { firstName: e.target.value })}
+                        placeholder="Enter first name"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="lastName">Last Name *</Label>
+                      <Input
+                        id="lastName"
+                        value={currentMember.lastName || ''}
+                        onChange={(e) => updateMemberForm(currentMemberIndex, { lastName: e.target.value })}
+                        placeholder="Enter last name"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="email">Email *</Label>
+                      <Input
+                        id="email"
+                        type="email"
+                        value={currentMember.email || ''}
+                        onChange={(e) => updateMemberForm(currentMemberIndex, { email: e.target.value })}
+                        placeholder="Enter email address"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="phone">Phone *</Label>
+                      <Input
+                        id="phone"
+                        value={currentMember.phone || ''}
+                        onChange={(e) => updateMemberForm(currentMemberIndex, { phone: e.target.value })}
+                        placeholder="Enter phone number"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="nationalId">National ID *</Label>
+                      <Input
+                        id="nationalId"
+                        value={currentMember.nationalId || ''}
+                        onChange={(e) => updateMemberForm(currentMemberIndex, { nationalId: e.target.value })}
+                        placeholder="Enter national ID"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="address">Address</Label>
+                      <Input
+                        id="address"
+                        value={currentMember.address || ''}
+                        onChange={(e) => updateMemberForm(currentMemberIndex, { address: e.target.value })}
+                        placeholder="Enter address"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="emergencyContact">Emergency Contact</Label>
+                      <Input
+                        id="emergencyContact"
+                        value={currentMember.emergencyContact || ''}
+                        onChange={(e) => updateMemberForm(currentMemberIndex, { emergencyContact: e.target.value })}
+                        placeholder="Emergency contact name"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="emergencyPhone">Emergency Phone</Label>
+                      <Input
+                        id="emergencyPhone"
+                        value={currentMember.emergencyPhone || ''}
+                        onChange={(e) => updateMemberForm(currentMemberIndex, { emergencyPhone: e.target.value })}
+                        placeholder="Emergency contact phone"
+                      />
                     </div>
                   </div>
                 )}
-
-                {/* Show available members */}
-                <div className="max-h-64 overflow-y-auto space-y-2">
-                  {searchingMembers ? (
-                    <div className="text-center py-8">
-                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto mb-2"></div>
-                      <p className="text-sm text-muted-foreground">Searching members...</p>
-                    </div>
-                  ) : filteredExistingMembers.length > 0 ? (
-                    <>
-                      {/* Show section header for couple/family packages */}
-                      {selectedPackage?.max_members > 1 && !existingMemberSearch && (
-                        <div className="mb-3">
-                          <Label className="text-sm font-medium text-muted-foreground">
-                            Expired Members Available for Renewal:
-                          </Label>
-                        </div>
-                      )}
-                      {filteredExistingMembers.map((member) => {
-                        const memberStatus = getMemberStatus(member);
-                        return (
-                          <Card 
-                            key={member.id} 
-                            className={`cursor-pointer transition-colors ${
-                              memberStatus.status === 'expired' 
-                                ? 'hover:bg-red-50 border-red-200' 
-                                : 'hover:bg-muted/50'
-                            }`}
-                            onClick={() => selectExistingMember(member)}
-                          >
-                            <CardContent className="p-4">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                  <div>
-                                    <p className="font-medium">{member.first_name} {member.last_name}</p>
-                                    <p className="text-sm text-muted-foreground">{member.email}</p>
-                                    <p className="text-xs text-muted-foreground">{member.phone}</p>
-                                    {memberStatus.status === 'expired' && (
-                                      <p className="text-xs text-red-600 mt-1">
-                                        Expired {Math.abs(Math.ceil((new Date(member.expiry_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)))} days ago
-                                      </p>
-                                    )}
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <Badge 
-                                    variant="outline" 
-                                    className={`text-xs ${
-                                      memberStatus.color === 'green' ? 'border-green-500 text-green-700' :
-                                      memberStatus.color === 'red' ? 'border-red-500 text-red-700 bg-red-50' :
-                                      'border-yellow-500 text-yellow-700'
-                                    }`}
-                                  >
-                                    {memberStatus.status}
-                                  </Badge>
-                                  {memberStatus.status === 'expired' && (
-                                    <AlertTriangle className="h-4 w-4 text-red-500" />
-                                  )}
-                                </div>
-                              </div>
-                            </CardContent>
-                          </Card>
-                        );
-                      })}
-                    </>
-                  ) : (
-                    <div className="text-center py-8">
-                      <Users className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-                      <p className="text-sm text-muted-foreground">
-                        {selectedPackage?.max_members > 1 && !existingMemberSearch 
-                          ? "No expired members found" 
-                          : "No members found"
-                        }
-                      </p>
-                    </div>
-                  )}
-                </div>
-                
-                {/* Show search instruction for individual packages */}
-                {selectedPackage?.max_members === 1 && !existingMemberSearch && existingMembers.length === 0 && !searchingMembers && (
-                  <div className="text-center py-8">
-                    <Search className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground mb-3">Search for existing members</p>
-                    <p className="text-xs text-muted-foreground mb-4">Including expired members who can be renewed</p>
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={fetchExistingMembers}
-                    >
-                      Load Members
-                    </Button>
-                  </div>
-                )}
-
-                {/* Show search instruction when members are loaded */}
-                {selectedPackage?.max_members === 1 && !existingMemberSearch && existingMembers.length > 0 && (
-                  <div className="text-center py-8">
-                    <Search className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Start typing to search for existing members</p>
-                    <p className="text-xs text-muted-foreground mt-1">Including expired members who can be renewed</p>
-                  </div>
-                )}
-              </TabsContent>
-            </Tabs>
+              </CardContent>
+            </Card>
           </div>
         );
 
@@ -782,27 +544,21 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
           <div className="space-y-6">
             <div className="text-center mb-6">
               <CreditCard className="h-12 w-12 mx-auto mb-4 text-primary" />
-              <h3 className="text-lg font-semibold">Payment Information</h3>
-              <p className="text-muted-foreground">Configure payment details for the membership</p>
+              <h3 className="text-lg font-semibold">Payment Configuration</h3>
+              <p className="text-muted-foreground">Set duration and payment details</p>
             </div>
 
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Package Summary</CardTitle>
+            <Card className="bg-blue-50 border-blue-200">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base text-blue-800">Selected Package</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <CardContent className="pt-0">
+                <div className="flex items-center justify-between">
                   <div>
-                    <Label className="text-sm font-medium">Package</Label>
-                    <p className="text-sm text-muted-foreground">{selectedPackage?.name}</p>
-                  </div>
-                  <div>
-                    <Label className="text-sm font-medium">Members</Label>
-                    <p className="text-sm text-muted-foreground">{memberForms.length} member{memberForms.length > 1 ? 's' : ''}</p>
-                  </div>
-                  <div>
-                    <Label className="text-sm font-medium">Duration</Label>
-                    <p className="text-sm text-muted-foreground">{paymentInfo.duration} month{paymentInfo.duration > 1 ? 's' : ''}</p>
+                    <p className="font-semibold text-blue-900">{selectedPackage?.name}</p>
+                    <p className="text-sm text-blue-700">
+                      {selectedPackage?.type} package • ${selectedPackage?.price}/month • {memberForms.length} member{memberForms.length > 1 ? 's' : ''}
+                    </p>
                   </div>
                 </div>
               </CardContent>
@@ -810,44 +566,59 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <Label htmlFor="duration">Duration (Months) *</Label>
-                <Input
-                  id="duration"
-                  type="number"
-                  min="1"
-                  max="24"
-                  value={paymentInfo.duration}
-                  onChange={(e) => setPaymentInfo(prev => ({ ...prev, duration: parseInt(e.target.value) || 1 }))}
-                  className="mt-1"
-                />
+                <Label htmlFor="duration">Duration (months) *</Label>
+                <Select 
+                  value={paymentInfo.duration.toString()} 
+                  onValueChange={(value) => {
+                    const duration = parseInt(value);
+                    const totalPrice = selectedPackage ? selectedPackage.price * duration * memberForms.length : 0;
+                    setPaymentInfo(prev => ({ ...prev, duration, price: totalPrice }));
+                  }}
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Select duration" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[1, 2, 3, 6, 12].map((months) => (
+                      <SelectItem key={months} value={months.toString()}>
+                        {months} month{months > 1 ? 's' : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
+
               <div>
-                <Label htmlFor="price">Total Amount *</Label>
+                <Label htmlFor="price">Total Amount (USD) *</Label>
                 <Input
                   id="price"
                   type="number"
-                  min="0"
                   step="0.01"
                   value={paymentInfo.price}
                   onChange={(e) => setPaymentInfo(prev => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
+                  placeholder="Enter total amount"
                   className="mt-1"
                 />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Calculated: ${selectedPackage ? (selectedPackage.price * paymentInfo.duration * memberForms.length).toFixed(2) : '0.00'}
+                </p>
               </div>
-            </div>
 
-            <div>
-              <Label htmlFor="paymentMethod">Payment Method *</Label>
-              <Select value={paymentInfo.paymentMethod} onValueChange={(value) => setPaymentInfo(prev => ({ ...prev, paymentMethod: value }))}>
-                <SelectTrigger className="mt-1">
-                  <SelectValue placeholder="Select payment method" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="cash">Cash</SelectItem>
-                  <SelectItem value="card">Credit/Debit Card</SelectItem>
-                  <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
-                  <SelectItem value="digital_wallet">Digital Wallet</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="md:col-span-2">
+                <Label htmlFor="paymentMethod">Payment Method *</Label>
+                <Select 
+                  value={paymentInfo.paymentMethod} 
+                  onValueChange={(value) => setPaymentInfo(prev => ({ ...prev, paymentMethod: value }))}
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Select payment method" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cash">Cash</SelectItem>
+                    <SelectItem value="card">Credit/Debit Card</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
         );
@@ -857,8 +628,8 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
           <div className="space-y-6">
             <div className="text-center mb-6">
               <Shield className="h-12 w-12 mx-auto mb-4 text-primary" />
-              <h3 className="text-lg font-semibold">Staff Verification</h3>
-              <p className="text-muted-foreground">Verify your identity to complete the registration</p>
+              <h3 className="text-lg font-semibold">Staff Verification Required</h3>
+              <p className="text-muted-foreground">Verify your identity to create the member accounts</p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
