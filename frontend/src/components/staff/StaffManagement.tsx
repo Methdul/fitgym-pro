@@ -76,22 +76,44 @@ export const StaffManagement = ({ staff, branchId, onStaffUpdate }: StaffManagem
   const seniorStaff = staff.filter(s => s.role === 'manager' || s.role === 'senior_staff');
 
   const validateStaffForm = () => {
+    // First name validation
     if (!newStaff.firstName.trim()) {
       setError('First name is required');
       return false;
     }
+    if (!/^[a-zA-Z\s'-]+$/.test(newStaff.firstName.trim())) {
+      setError('First name can only contain letters, spaces, hyphens, and apostrophes');
+      return false;
+    }
+    
+    // Last name validation  
     if (!newStaff.lastName.trim()) {
       setError('Last name is required');
       return false;
     }
+    if (!/^[a-zA-Z\s'-]+$/.test(newStaff.lastName.trim())) {
+      setError('Last name can only contain letters, spaces, hyphens, and apostrophes (no numbers like 8282)');
+      return false;
+    }
+    
+    // Email validation
     if (!newStaff.email.trim()) {
       setError('Email is required');
       return false;
     }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(newStaff.email)) {
+      setError('Please enter a valid email address');
+      return false;
+    }
+    
+    // Role validation
     if (!newStaff.role) {
       setError('Role is required');
       return false;
     }
+    
+    // PIN validation
     if (!newStaff.pin) {
       setError('PIN is required');
       return false;
@@ -101,9 +123,10 @@ export const StaffManagement = ({ staff, branchId, onStaffUpdate }: StaffManagem
       return false;
     }
     
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(newStaff.email)) {
-      setError('Please enter a valid email address');
+    // Check for weak PINs
+    const weakPins = ['0000', '1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999', '1234', '4321'];
+    if (weakPins.includes(newStaff.pin)) {
+      setError('PIN is too weak. Avoid sequential or repeated digits like 1234 or 1111');
       return false;
     }
 
@@ -120,9 +143,9 @@ export const StaffManagement = ({ staff, branchId, onStaffUpdate }: StaffManagem
     setLoading(true);
     try {
       const { data, error } = await db.staff.create({
-        branch_id: branchId,
-        first_name: newStaff.firstName,
-        last_name: newStaff.lastName,
+        branchId: branchId,            // ← CHANGED from branch_id
+        firstName: newStaff.firstName, // ← CHANGED from first_name  
+        lastName: newStaff.lastName, 
         email: newStaff.email,
         phone: newStaff.phone || null,
         role: newStaff.role,

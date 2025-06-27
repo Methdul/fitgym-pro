@@ -246,8 +246,10 @@ router.post('/',
         type, 
         price, 
         duration_months, 
+        max_members,
         features, 
-        is_active 
+        is_active,
+        branch_id  // ← PUT THIS BACK
       } = req.body;
       
       // Check if user has pricing permission to set price
@@ -281,8 +283,10 @@ router.post('/',
         type,
         price: parseFloat(price),
         duration_months: parseInt(duration_months),
+        max_members: parseInt(max_members),
         features: Array.isArray(features) ? features : ['Gym Access'],
         is_active: Boolean(is_active),
+        branch_id: branch_id,  // ← PUT THIS BACK
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };

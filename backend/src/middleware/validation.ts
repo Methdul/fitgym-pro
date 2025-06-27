@@ -154,6 +154,12 @@ export const validateUUID = (field: string) => {
     .isUUID()
     .withMessage(`${field} must be a valid UUID`);
 };
+// Add this NEW function for validating UUIDs in request body
+export const validateUUIDInBody = (field: string) => {
+  return body(field)
+    .isUUID()
+    .withMessage(`${field} must be a valid UUID`);
+};
 
 // Email validation
 export const validateEmail = (field: string) => {
@@ -383,7 +389,7 @@ export const commonValidations = {
     validatePhone('phone'),
     validateEnum('role', ['manager', 'senior_staff', 'associate']),
     validatePIN('pin'),
-    validateUUID('branchId'),
+    validateUUIDInBody('branchId'), 
     handleValidationErrors
   ],
   
@@ -402,7 +408,7 @@ export const commonValidations = {
     validateInteger('max_members', 1),
     validateArray('features'),
     validateBoolean('is_active'),
-    validateUUID('branch_id'),
+    validateUUIDInBody('branch_id'),  // ← PUT THIS BACK, but use body validation
     handleValidationErrors
   ],
   

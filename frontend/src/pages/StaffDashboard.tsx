@@ -564,13 +564,14 @@ const StaffDashboard = () => {
         method: 'POST',
         headers: authHeaders,
         body: JSON.stringify({
-          branch_id: branchId,
+          branch_id: branchId,  // ← PUT THIS BACK
           name: packageForm.name,
           type: packageForm.type,
           price: parseFloat(packageForm.price),
           duration_months: parseInt(packageForm.duration_months),
           max_members: parseInt(packageForm.max_members),
-          features: packageForm.features.length > 0 ? packageForm.features : ['Gym Access', 'Locker Room']
+          features: packageForm.features.length > 0 ? packageForm.features : ['Gym Access', 'Locker Room'],
+          is_active: true
         }),
       });
 
