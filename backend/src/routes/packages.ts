@@ -45,12 +45,13 @@ router.get('/branch/:branchId',
       const userPermissions = await rbacUtils.getUserPermissions(req.user);
       
       // Select fields based on permissions
-      let selectFields = 'id, name, type, duration_months, features, is_active';
-      
+      let selectFields = 'id, name, type, duration_months, max_members, features, is_active';
+
       if (rbacUtils.hasPermission(userPermissions, Permission.PACKAGES_PRICING)) {
         // Include pricing info for users with pricing permission
-        selectFields = 'id, name, type, price, duration_months, features, is_active, created_at, updated_at';
+        selectFields = 'id, name, type, price, duration_months, max_members, features, is_active, created_at, updated_at';
       }
+
       
       const { data, error } = await supabase
         .from('packages')
@@ -137,10 +138,11 @@ router.get('/',
       const userPermissions = await rbacUtils.getUserPermissions(req.user);
       
       // Select fields based on permissions
-      let selectFields = 'id, name, type, duration_months, features, is_active, created_at';
+      let selectFields = 'id, name, type, duration_months, max_members, features, is_active, created_at';
+
       
       if (rbacUtils.hasPermission(userPermissions, Permission.PACKAGES_PRICING)) {
-        selectFields = 'id, name, type, price, duration_months, features, is_active, created_at, updated_at';
+        selectFields = 'id, name, type, price, duration_months, max_members, features, is_active, created_at, updated_at';
       }
       
       const { data, error } = await supabase
@@ -189,10 +191,10 @@ router.get('/:id',
 
       const userPermissions = await rbacUtils.getUserPermissions(req.user);
       
-      let selectFields = 'id, name, type, duration_months, features, is_active';
+      let selectFields = 'id, name, type, duration_months, max_members, features, is_active';
       
       if (rbacUtils.hasPermission(userPermissions, Permission.PACKAGES_PRICING)) {
-        selectFields = 'id, name, type, price, duration_months, features, is_active, created_at, updated_at';
+        selectFields = 'id, name, type, price, duration_months, max_members, features, is_active, created_at, updated_at';
       }
 
       const { data, error } = await supabase
