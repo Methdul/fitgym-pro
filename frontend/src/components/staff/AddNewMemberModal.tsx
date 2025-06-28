@@ -346,6 +346,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
   };
 
   // Submit form - FIXED to only send required backend fields
+// Submit form - PERMANENTLY FIXED to match backend expectations
   const handleSubmit = async () => {
     setLoading(true);
     try {
@@ -360,21 +361,19 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
           continue;
         }
         
-        // Only send the fields that backend validation expects + flag for auth account creation
+        // ✅ FIXED: Send data in the format backend expects
         const memberData = {
           firstName: member.firstName,
           lastName: member.lastName,
-          email: `${member.nationalId}@gmail.com`, // Use generated email like existing member
+          email: member.email, // ← Use the actual email from form
           phone: member.phone,
-          branchId: branchId, // Make sure this is a valid UUID
-          packageId: selectedPackage?.id, // Make sure this is a valid UUID
-          // Optional fields that backend accepts
+          branchId: branchId,
+          packageId: selectedPackage?.id,
+          nationalId: member.nationalId, // ← Send nationalId properly
+          // Optional fields
           emergencyContact: member.emergencyContact || '',
           address: member.address || '',
-          nationalId: member.nationalId || '', // Add this back as it's likely needed
-          // IMPORTANT: Add this flag to create user auth account (same as existing member)
-          is_existing_member: true // This tells backend to generate auth account
-          // Backend calculates: packageType, packageName, packagePrice, dates, status, etc.
+          dateOfBirth: '', // Add if needed
         };
 
         console.log('Sending member data:', memberData);
@@ -410,12 +409,12 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
 
         const result = await response.json();
         
-        // Add account credentials for display (same as existing member logic)
+        // ✅ FIXED: Use real credentials from backend response
         const memberWithCredentials = {
           ...result.data,
-          // Use same format as AddExistingMemberModal: nationalId@gmail.com + nationalId as password
-          accountEmail: `${member.nationalId}@gmail.com`, // Same format: ID@gmail.com
-          accountPassword: member.nationalId, // Same as existing member: National ID as password
+          // Use the loginCredentials returned by backend
+          accountEmail: result.data.loginCredentials?.email || result.data.email,
+          accountPassword: result.data.loginCredentials?.password || member.nationalId,
           fullName: `${result.data.first_name} ${result.data.last_name}`
         };
         
