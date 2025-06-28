@@ -308,7 +308,6 @@ router.post('/debug/process-no-auth',
 router.post('/process', 
   authRateLimit,                               // PHASE 1 FIX: PIN brute force protection
   renewalProcessValidation,                    // PHASE 1 FIX: Input validation
-  pinAttemptTracking,                          // PHASE 1 FIX: PIN attempt tracking
   authenticate,                                // Must be authenticated
   requirePermission(Permission.RENEWALS_PROCESS), // Must have renewal processing permission
   auditLog('PROCESS_MEMBER_RENEWAL', 'renewals'),
