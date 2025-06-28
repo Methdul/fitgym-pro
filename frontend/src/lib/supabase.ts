@@ -613,10 +613,11 @@ export const db = {
 
   // Packages - BACKEND API INTEGRATION (UPDATED)
   packages: {
-    getActive: async () => {
+    // NEW: Get active packages for a specific branch
+    getActiveByBranch: async (branchId: string) => {
       try {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
-        const response = await fetch(`${API_BASE_URL}/packages/active`, {
+        const response = await fetch(`${API_BASE_URL}/packages/branch/${branchId}/active`, {
           headers: getAuthHeaders(),
         });
         const result = await response.json();
@@ -632,10 +633,11 @@ export const db = {
       }
     },
 
-    getAll: async () => {
+    // NEW: Get all packages for a specific branch
+    getByBranch: async (branchId: string) => {
       try {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
-        const response = await fetch(`${API_BASE_URL}/packages`, {
+        const response = await fetch(`${API_BASE_URL}/packages/branch/${branchId}`, {
           headers: getAuthHeaders(),
         });
         const result = await response.json();
@@ -651,6 +653,7 @@ export const db = {
       }
     },
 
+    // KEEP: Get single package by ID (unchanged)
     getById: async (id: string) => {
       try {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
@@ -670,6 +673,7 @@ export const db = {
       }
     },
 
+    // KEEP: Create package (unchanged)
     create: async (pkg: any) => {
       try {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
@@ -692,6 +696,7 @@ export const db = {
       }
     },
 
+    // KEEP: Update package (unchanged)
     update: async (id: string, updates: any) => {
       try {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
@@ -714,6 +719,7 @@ export const db = {
       }
     },
 
+    // KEEP: Delete package (unchanged)
     delete: async (id: string) => {
       try {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';

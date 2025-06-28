@@ -6,9 +6,12 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { 
   Calendar, CreditCard, Shield, Package as PackageIcon, CheckCircle, 
-  RefreshCw, User, Clock, AlertCircle, Check, Users, AlertTriangle, Search, X
+  RefreshCw, User, Clock, AlertCircle, Check, Users, AlertTriangle, Search, X,
+  Info, DollarSign
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { getAuthHeaders } from '@/lib/supabase';
@@ -28,9 +31,9 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
   const [staff, setStaff] = useState<BranchStaff[]>([]);
   const [existingMembers, setExistingMembers] = useState<Member[]>([]);
   const [selectedPackage, setSelectedPackage] = useState<Package | null>(null);
-  const [duration, setDuration] = useState('');
-  const [price, setPrice] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<string | undefined>(undefined);
+  const [duration, setDuration] = useState<number>(1);
+  const [customPrice, setCustomPrice] = useState<string>('');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card'>('cash');
   const [verification, setVerification] = useState({ staffId: '', pin: '' });
   const [loading, setLoading] = useState(false);
   const [loadingPackages, setLoadingPackages] = useState(false);
@@ -39,12 +42,36 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
   const [searchingMembers, setSearchingMembers] = useState(false);
   const { toast } = useToast();
 
+  // Helper functions from AddNewMemberModal
+  const calculatePrice = () => {
+    if (!selectedPackage) return 0;
+    return selectedPackage.price * duration;
+  };
+
+  const resetPriceToCalculated = () => {
+    setCustomPrice(calculatePrice().toString());
+  };
+
+  const validateSummary = (): boolean => {
+    const priceValid = duration > 0 && parseFloat(customPrice || '0') > 0;
+    const paymentValid = (paymentMethod === 'cash' || paymentMethod === 'card');
+    return priceValid && paymentValid;
+  };
+
   useEffect(() => {
     if (isOpen && branchId) {
       fetchPackages();
       fetchStaff();
     }
   }, [isOpen, branchId]);
+
+  // Update price when duration changes
+  useEffect(() => {
+    if (selectedPackage && duration) {
+      const totalPrice = selectedPackage.price * duration;
+      setCustomPrice(totalPrice.toString());
+    }
+  }, [selectedPackage, duration]);
 
   // Fetch existing members when couple/family package is selected
   useEffect(() => {
@@ -105,7 +132,6 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
       
       if (response.ok) {
         const allMembers = result.data || [];
-        // Filter out the current member and only show members that can be added to packages
         const availableMembers = allMembers.filter((m: Member) => m.id !== member?.id);
         setExistingMembers(availableMembers);
       } else {
@@ -136,7 +162,7 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
   const getExpiredMembers = () => {
     return existingMembers.filter(member => {
       const status = getMemberStatus(member);
-      return status.color === 'red'; // Only expired members
+      return status.color === 'red';
     });
   };
 
@@ -153,9 +179,8 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
 
   const addAdditionalMember = (additionalMember: Member) => {
     if (selectedAdditionalMembers.find(m => m.id === additionalMember.id)) {
-      return; // Already selected
+      return;
     }
-    
     setSelectedAdditionalMembers(prev => [...prev, additionalMember]);
     setExistingMemberSearch('');
   };
@@ -177,30 +202,26 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
     return daysUntilExpiry < 0;
   };
 
-  // ✅ FIXED: Updated handleRenewal to send correct data format
   const handleRenewal = async () => {
     if (!member || !selectedPackage) return;
 
     setLoading(true);
     try {
-      // ✅ PHASE 2 FIX: Send staffId and staffPin as TOP-LEVEL fields (not nested)
       const renewalData: any = {
         memberId: member.id,
         packageId: selectedPackage.id,
-        durationMonths: parseInt(duration),
-        amountPaid: parseFloat(price),
+        durationMonths: duration,
+        amountPaid: parseFloat(customPrice),
         paymentMethod,
-        staffId: verification.staffId,      // ✅ Top-level field
-        staffPin: verification.pin          // ✅ Top-level field (renamed from 'pin' to 'staffPin')
+        staffId: verification.staffId,
+        staffPin: verification.pin
       };
 
-      // Add additional members for couple/family packages
       if (selectedPackage.max_members > 1 && selectedAdditionalMembers.length > 0) {
         renewalData.additionalMembers = selectedAdditionalMembers.map(m => m.id);
       }
 
       console.log('🔄 Sending renewal request:', renewalData);
-      console.log('🔐 Auth headers:', getAuthHeaders());
 
       const response = await fetch(
         `${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/renewals/process`,
@@ -214,12 +235,8 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
         }
       );
 
-      console.log('📡 Response status:', response.status);
-      console.log('📡 Response headers:', Object.fromEntries(response.headers.entries()));
-
       if (!response.ok) {
         const errorData = await response.json();
-        console.error('❌ Backend error response:', errorData);
         throw new Error(errorData.error || errorData.message || 'Failed to process renewal');
       }
 
@@ -232,16 +249,7 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
         description: `${memberCount} member${memberCount > 1 ? 's have' : ' has'} been successfully renewed.`,
       });
 
-      // Reset form and close modal
-      setStep(1);
-      setSelectedPackage(null);
-      setDuration('');
-      setPrice('');
-      setPaymentMethod(undefined);
-      setVerification({ staffId: '', pin: '' });
-      setSelectedAdditionalMembers([]);
-      setExistingMemberSearch('');
-      
+      resetForm();
       onRenewalComplete();
       onClose();
 
@@ -260,12 +268,12 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
   const resetForm = () => {
     setStep(1);
     setSelectedPackage(null);
-    setDuration('');
-    setPrice('');
-    setPaymentMethod(undefined);
+    setDuration(1);
+    setCustomPrice('');
+    setPaymentMethod('cash');
     setVerification({ staffId: '', pin: '' });
     setSelectedAdditionalMembers([]);
-    setExistingMembers([]); // Clear existing members cache
+    setExistingMembers([]);
     setExistingMemberSearch('');
   };
 
@@ -273,9 +281,9 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto gym-card-gradient border-border">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+          <DialogTitle className="flex items-center gap-2 text-foreground">
             <RefreshCw className="h-5 w-5 text-primary" />
             Renew Membership - {member.first_name} {member.last_name}
           </DialogTitle>
@@ -286,7 +294,7 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
           <div className="space-y-6">
             <div className="text-center mb-6">
               <PackageIcon className="h-12 w-12 mx-auto mb-4 text-primary" />
-              <h3 className="text-lg font-semibold">Select Renewal Package</h3>
+              <h3 className="text-lg font-semibold text-foreground">Select Renewal Package</h3>
               <p className="text-muted-foreground">Choose a package for membership renewal</p>
             </div>
             
@@ -339,36 +347,33 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
             {loadingPackages ? (
               <div className="flex items-center justify-center py-8">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                <span className="ml-2">Loading packages...</span>
+                <span className="ml-2 text-foreground">Loading packages...</span>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {packages.map((pkg) => (
                   <Card 
                     key={pkg.id} 
-                    className={`cursor-pointer transition-all hover:shadow-md ${
+                    className={`cursor-pointer transition-all hover:shadow-md gym-card-gradient ${
                       selectedPackage?.id === pkg.id 
-                        ? 'ring-2 ring-primary bg-primary/5' 
-                        : 'hover:border-primary/50'
+                        ? 'ring-2 ring-primary border-primary' 
+                        : 'border-border hover:border-primary/50'
                     }`}
                     onClick={() => setSelectedPackage(pkg)}
                   >
                     <CardHeader className="pb-3">
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="text-base">{pkg.name}</CardTitle>
-                        {selectedPackage?.id === pkg.id && (
-                          <CheckCircle className="h-5 w-5 text-primary" />
-                        )}
-                      </div>
-                      <Badge variant="outline" className="w-fit">
-                        {pkg.type} • Max {pkg.max_members} member{pkg.max_members > 1 ? 's' : ''}
-                      </Badge>
+                      <CardTitle className="text-base flex items-center justify-between text-foreground">
+                        {pkg.name}
+                        <Badge variant="secondary">
+                          {pkg.max_members} member{pkg.max_members !== 1 ? 's' : ''}
+                        </Badge>
+                      </CardTitle>
                     </CardHeader>
                     <CardContent>
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
                           <span className="text-sm text-muted-foreground">Price</span>
-                          <span className="font-semibold">${pkg.price}/month</span>
+                          <span className="font-semibold text-foreground">${pkg.price}/month</span>
                         </div>
                         <div className="text-xs text-muted-foreground">
                           <ul className="space-y-1">
@@ -389,212 +394,276 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
           </div>
         )}
 
-        {/* Step 2: Duration and Payment */}
+        {/* Step 2: Package Summary & Payment (Enhanced from AddNewMemberModal) */}
         {step === 2 && (
           <div className="space-y-6">
             <div className="text-center mb-6">
-              <CreditCard className="h-12 w-12 mx-auto mb-4 text-primary" />
-              <h3 className="text-lg font-semibold">Duration & Payment Details</h3>
-              <p className="text-muted-foreground">Configure the renewal terms and payment</p>
+              <DollarSign className="h-12 w-12 mx-auto mb-4 text-primary" />
+              <h3 className="text-lg font-semibold text-foreground">Package Summary & Payment</h3>
+              <p className="text-muted-foreground">Review your selection and configure payment</p>
             </div>
 
-            <Card className="bg-blue-50 border-blue-200">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base text-blue-800">Selected Package</CardTitle>
+            {/* Package Summary */}
+            <Card className="gym-card-gradient border-border">
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2 text-foreground">
+                  <PackageIcon className="h-4 w-4" />
+                  Package Details
+                </CardTitle>
               </CardHeader>
-              <CardContent className="pt-0">
+              <CardContent className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-semibold text-blue-900">{selectedPackage?.name}</p>
-                    <p className="text-sm text-blue-700">{selectedPackage?.type} package • ${selectedPackage?.price}/month</p>
-                  </div>
-                  <Badge variant="outline" className="text-blue-800 border-blue-300">
-                    Max {selectedPackage?.max_members} member{selectedPackage?.max_members !== 1 ? 's' : ''}
+                  <span className="font-medium text-foreground">{selectedPackage?.name}</span>
+                  <Badge variant="outline">
+                    {selectedPackage?.max_members} member{selectedPackage?.max_members > 1 ? 's' : ''}
                   </Badge>
+                </div>
+                
+                <Separator className="bg-border" />
+                
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Base Price</span>
+                    <span className="text-foreground">${selectedPackage?.price}/month</span>
+                  </div>
+                  
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="duration" className="text-foreground">Duration *</Label>
+                    <Select value={duration.toString()} onValueChange={(value) => setDuration(parseInt(value))}>
+                      <SelectTrigger className="w-32 bg-background border-border">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[1, 2, 3, 6, 12].map((months) => (
+                          <SelectItem key={months} value={months.toString()}>
+                            {months} month{months > 1 ? 's' : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Calculated Total</span>
+                    <span className="font-medium text-foreground">${calculatePrice()}</span>
+                  </div>
+                  
+                  <Separator className="bg-border" />
+                  
+                  {/* Professional Price Editing Section */}
+                  <div className="bg-accent/30 p-4 rounded-lg border border-border">
+                    <div className="flex items-center justify-between mb-3">
+                      <Label className="text-base font-medium text-foreground">Final Price</Label>
+                      {parseFloat(customPrice || '0') !== calculatePrice() && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={resetPriceToCalculated}
+                          className="text-xs h-7"
+                        >
+                          Reset to Calculated
+                        </Button>
+                      )}
+                    </div>
+                    
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1">
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={customPrice}
+                          onChange={(e) => setCustomPrice(e.target.value)}
+                          className="text-lg font-semibold bg-background border-border text-foreground"
+                          placeholder="0.00"
+                        />
+                      </div>
+                      <span className="text-sm text-muted-foreground">USD</span>
+                    </div>
+                    
+                    {parseFloat(customPrice || '0') !== calculatePrice() && (
+                      <div className="mt-2 text-sm text-amber-300 bg-amber-500/10 p-2 rounded flex items-center gap-2 border border-amber-500/20">
+                        <Info className="h-4 w-4" />
+                        <span>Custom pricing applied (${Math.abs(parseFloat(customPrice || '0') - calculatePrice()).toFixed(2)} {parseFloat(customPrice || '0') > calculatePrice() ? 'above' : 'below'} calculated price)</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </CardContent>
             </Card>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <Label htmlFor="duration">Duration (months) *</Label>
-                <Select value={duration} onValueChange={(value) => {
-                  setDuration(value);
-                  if (selectedPackage) {
-                    const totalPrice = selectedPackage.price * parseInt(value);
-                    setPrice(totalPrice.toString());
-                  }
-                }}>
-                  <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="Select duration" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {[1, 2, 3, 6, 12].map((months) => (
-                      <SelectItem key={months} value={months.toString()}>
-                        {months} month{months > 1 ? 's' : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            {/* Member Summary */}
+            <Card className="gym-card-gradient border-border">
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2 text-foreground">
+                  <User className="h-4 w-4" />
+                  Member Details
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Primary Member</span>
+                    <span className="font-medium text-foreground">{member.first_name} {member.last_name}</span>
+                  </div>
+                  {selectedAdditionalMembers.length > 0 && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">Additional Members</span>
+                      <span className="font-medium text-foreground">{selectedAdditionalMembers.length}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Total Members</span>
+                    <span className="font-medium text-foreground">{1 + selectedAdditionalMembers.length}</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
-              <div>
-                <Label htmlFor="price">Total Amount (USD) *</Label>
-                <Input
-                  id="price"
-                  type="number"
-                  step="0.01"
-                  value={price}
-                  onChange={(e) => setPrice(e.target.value)}
-                  placeholder="Enter total amount"
-                  className="mt-1"
-                />
-              </div>
+            {/* Payment Method */}
+            <Card className="gym-card-gradient border-border">
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2 text-foreground">
+                  <CreditCard className="h-4 w-4" />
+                  Payment Method
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <RadioGroup value={paymentMethod} onValueChange={(value) => setPaymentMethod(value as 'cash' | 'card')}>
+                  <div className="space-y-3">
+                    <label className={`flex items-start space-x-3 p-4 rounded-lg border cursor-pointer transition-colors ${
+                      paymentMethod === 'cash' ? 'border-primary bg-primary/10' : 'border-border hover:border-border/60'}`}>
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="cash" id="cash" />
+                        <div className="flex items-center gap-2 font-medium text-foreground">
+                          <DollarSign className="h-5 w-5" />
+                          Cash Payment
+                        </div>
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-2 ml-6">
+                        Pay with cash at the front desk
+                      </p>
+                    </label>
 
-              <div className="md:col-span-2">
-                <Label htmlFor="paymentMethod">Payment Method *</Label>
-                <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-                  <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="Select payment method" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="cash">Cash</SelectItem>
-                    <SelectItem value="card">Credit/Debit Card</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+                    <label className={`flex items-start space-x-3 p-4 rounded-lg border cursor-pointer transition-colors ${
+                      paymentMethod === 'card' ? 'border-primary bg-primary/10' : 'border-border hover:border-border/60'}`}>
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="card" id="card" />
+                        <div className="flex items-center gap-2 font-medium text-foreground">
+                          <CreditCard className="h-5 w-5" />
+                          Card Payment
+                        </div>
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-2 ml-6">
+                        Pay with credit or debit card
+                      </p>
+                    </label>
+                  </div>
+                </RadioGroup>
+              </CardContent>
+            </Card>
 
             {/* Additional Members Section for Couple/Family packages */}
             {selectedPackage && selectedPackage.max_members > 1 && (
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <Users className="h-5 w-5 text-primary" />
-                  <h4 className="text-lg font-semibold">Additional Members</h4>
-                  <Badge variant="outline">
-                    {selectedAdditionalMembers.length}/{selectedPackage.max_members - 1} selected
-                  </Badge>
-                </div>
-                
-                <p className="text-sm text-muted-foreground">
-                  This package allows up to {selectedPackage.max_members} members. 
-                  You can add expired members below to include them in this renewal.
-                </p>
+              <Card className="gym-card-gradient border-border">
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2 text-foreground">
+                    <Users className="h-4 w-4" />
+                    Additional Members
+                    <Badge variant="outline">
+                      {selectedAdditionalMembers.length}/{selectedPackage.max_members - 1} selected
+                    </Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    This package allows up to {selectedPackage.max_members} members. 
+                    You can add expired members below to include them in this renewal.
+                  </p>
 
-                {/* Show expired members notice */}
-                {getExpiredMembers().length > 0 && (
-                  <div className="bg-orange-100 border border-orange-200 rounded-lg p-3">
-                    <div className="flex items-center gap-2 mb-2">
-                      <AlertTriangle className="h-4 w-4 text-orange-600" />
-                      <p className="text-sm font-medium text-orange-800">
-                        {getExpiredMembers().length} expired member{getExpiredMembers().length !== 1 ? 's' : ''} available
-                      </p>
-                    </div>
-                    <p className="text-xs text-orange-700">
-                      Select expired members below to include them in this renewal package.
-                    </p>
-                  </div>
-                )}
-
-                {/* Search for additional members */}
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-                  <Input
-                    className="pl-10"
-                    placeholder="Search for additional members..."
-                    value={existingMemberSearch}
-                    onChange={(e) => setExistingMemberSearch(e.target.value)}
-                  />
-                </div>
-
-                {/* Selected additional members */}
-                {selectedAdditionalMembers.length > 0 && (
+                  {/* Search for additional members */}
                   <div className="space-y-2">
-                    <Label className="text-sm font-medium">Selected Additional Members:</Label>
-                    <div className="space-y-2 max-h-32 overflow-y-auto">
-                      {selectedAdditionalMembers.map((additionalMember) => {
-                        const memberStatus = getMemberStatus(additionalMember);
-                        return (
-                          <div key={additionalMember.id} className="flex items-center justify-between p-2 bg-white rounded border">
-                            <div className="flex items-center gap-2">
-                              <div>
-                                <p className="text-sm font-medium">{additionalMember.first_name} {additionalMember.last_name}</p>
-                                <p className="text-xs text-muted-foreground">{additionalMember.email}</p>
+                    <div className="flex items-center gap-2">
+                      <Search className="h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Search for expired members to add..."
+                        value={existingMemberSearch}
+                        onChange={(e) => setExistingMemberSearch(e.target.value)}
+                        className="flex-1 bg-background border-border"
+                      />
+                    </div>
+                    
+                    {/* Show filtered expired members */}
+                    <div className="max-h-40 overflow-y-auto space-y-2">
+                      {existingMemberSearch && (
+                        getFilteredMembers().slice(0, 5).map((member) => {
+                          const memberStatus = getMemberStatus(member);
+                          return (
+                            <div key={member.id} className="flex items-center justify-between p-2 border border-border rounded bg-background">
+                              <div className="flex-1">
+                                <p className="font-medium text-foreground">{member.first_name} {member.last_name}</p>
+                                <p className="text-xs text-muted-foreground">{member.email}</p>
                               </div>
-                              <Badge 
-                                variant="outline" 
-                                className={`text-xs ${
-                                  memberStatus.color === 'red' ? 'border-red-300 text-red-800' :
-                                  memberStatus.color === 'yellow' ? 'border-yellow-300 text-yellow-800' :
-                                  'border-green-300 text-green-800'
-                                }`}
-                              >
-                                {memberStatus.status}
-                              </Badge>
-                            </div>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => removeAdditionalMember(additionalMember.id)}
-                              className="h-8 w-8 p-0"
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* Available members to select */}
-                {existingMemberSearch && (
-                  <div className="space-y-2">
-                    <Label className="text-sm font-medium">Available Members:</Label>
-                    <div className="space-y-2 max-h-48 overflow-y-auto">
-                      {getFilteredMembers().length === 0 ? (
-                        <p className="text-sm text-muted-foreground p-2">No expired members found.</p>
-                      ) : (
-                        getFilteredMembers()
-                          .filter(member => !selectedAdditionalMembers.find(selected => selected.id === member.id))
-                          .slice(0, 5)
-                          .map((member) => {
-                            const memberStatus = getMemberStatus(member);
-                            return (
-                              <div
-                                key={member.id}
-                                className="flex items-center justify-between p-2 bg-gray-50 rounded border cursor-pointer hover:bg-gray-100"
-                                onClick={() => {
-                                  if (selectedAdditionalMembers.length < selectedPackage.max_members - 1) {
-                                    addAdditionalMember(member);
-                                  }
-                                }}
-                              >
-                                <div className="flex items-center gap-2">
-                                  <div>
-                                    <p className="text-sm font-medium">{member.first_name} {member.last_name}</p>
-                                    <p className="text-xs text-muted-foreground">{member.email}</p>
-                                  </div>
-                                  <Badge 
-                                    variant="outline" 
-                                    className={`text-xs ${
-                                      memberStatus.color === 'red' ? 'border-red-300 text-red-800' : 'border-gray-300'
-                                    }`}
-                                  >
-                                    {memberStatus.status}
-                                  </Badge>
-                                </div>
-                                <Button variant="ghost" size="sm" className="h-8 px-3">
+                              <div className="flex items-center gap-2">
+                                <Badge 
+                                  variant="outline" 
+                                  className={`text-xs ${
+                                    memberStatus.color === 'red' ? 'border-red-300 text-red-800' : 'border-border'
+                                  }`}
+                                >
+                                  {memberStatus.status}
+                                </Badge>
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  className="h-8 px-3"
+                                  onClick={() => addAdditionalMember(member)}
+                                >
                                   Add
                                 </Button>
                               </div>
-                            );
-                          })
+                            </div>
+                          );
+                        })
                       )}
                     </div>
                   </div>
-                )}
-              </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Final Summary */}
+            <Card className="border-primary/20 bg-primary/10 gym-card-gradient">
+              <CardContent className="p-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-lg font-semibold text-foreground">Total Amount</span>
+                  <span className="text-2xl font-bold text-primary">${customPrice || '0'}</span>
+                </div>
+                <div className="text-sm text-muted-foreground mt-1">
+                  {duration} month{duration > 1 ? 's' : ''} • {1 + selectedAdditionalMembers.length} member{(1 + selectedAdditionalMembers.length) > 1 ? 's' : ''} • {paymentMethod === 'cash' ? 'Cash' : 'Card'} payment
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Validation Feedback */}
+            {!validateSummary() && (
+              <Card className="border-amber-500/20 bg-amber-500/10 gym-card-gradient">
+                <CardContent className="p-4">
+                  <div className="flex items-start gap-2">
+                    <Info className="h-5 w-5 text-amber-400 mt-0.5" />
+                    <div>
+                      <div className="font-medium text-amber-300">Please complete the following:</div>
+                      <ul className="text-sm text-amber-200 mt-1 space-y-1">
+                        {parseFloat(customPrice || '0') <= 0 && (
+                          <li>• Enter a valid price amount</li>
+                        )}
+                        {!paymentMethod && (
+                          <li>• Select a payment method</li>
+                        )}
+                      </ul>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             )}
           </div>
         )}
@@ -604,49 +673,85 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
           <div className="space-y-6">
             <div className="text-center mb-6">
               <Shield className="h-12 w-12 mx-auto mb-4 text-primary" />
-              <h3 className="text-lg font-semibold">Staff Verification Required</h3>
-              <p className="text-muted-foreground">Verify your identity to process the renewal</p>
+              <h3 className="text-lg font-semibold text-foreground">Staff Verification Required</h3>
+              <p className="text-muted-foreground">Confirm renewal processing and payment</p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <Label htmlFor="staffId">Staff Member *</Label>
-                <Select value={verification.staffId} onValueChange={(value) => setVerification(prev => ({ ...prev, staffId: value }))}>
-                  <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="Select staff member" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {staff.map((staffMember) => (
-                      <SelectItem key={staffMember.id} value={staffMember.id}>
-                        <div className="flex items-center gap-2">
-                          <User className="h-4 w-4" />
-                          {staffMember.first_name} {staffMember.last_name} 
-                          <Badge variant="outline" className="ml-2 text-xs">
-                            {staffMember.role}
-                          </Badge>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              
-              <div>
-                <Label htmlFor="pin">Security PIN *</Label>
-                <Input
-                  id="pin"
-                  type="password"
-                  value={verification.pin}
-                  onChange={(e) => setVerification(prev => ({ ...prev, pin: e.target.value }))}
-                  placeholder="Enter your security PIN"
-                  maxLength={6}
-                  className="mt-1"
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  Enter your 4-6 digit security PIN
-                </p>
-              </div>
-            </div>
+            {/* Transaction Summary */}
+            <Card className="border-primary/20 bg-primary/10 gym-card-gradient">
+              <CardHeader>
+                <CardTitle className="text-base text-primary">Transaction Summary</CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Package:</span>
+                  <span className="font-medium text-foreground">{selectedPackage?.name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Member:</span>
+                  <span className="font-medium text-foreground">{member.first_name} {member.last_name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Duration:</span>
+                  <span className="font-medium text-foreground">{duration} month{duration > 1 ? 's' : ''}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Payment:</span>
+                  <span className="font-medium text-foreground">{paymentMethod === 'cash' ? 'Cash' : 'Card'}</span>
+                </div>
+                <Separator className="bg-border/50" />
+                <div className="flex justify-between text-base font-semibold">
+                  <span className="text-foreground">Total Amount:</span>
+                  <span className="text-primary">${customPrice}</span>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Staff Verification Form */}
+            <Card className="gym-card-gradient border-border">
+              <CardHeader>
+                <CardTitle className="text-base text-foreground">Staff Authentication</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <Label htmlFor="staffId" className="text-foreground">Staff Member *</Label>
+                  <Select value={verification.staffId} onValueChange={(value) => setVerification(prev => ({ ...prev, staffId: value }))}>
+                    <SelectTrigger className="mt-1 bg-background border-border">
+                      <SelectValue placeholder="Select staff member" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {staff.map((staffMember) => (
+                        <SelectItem key={staffMember.id} value={staffMember.id}>
+                          <div className="flex items-center gap-2">
+                            <User className="h-4 w-4" />
+                            {staffMember.first_name} {staffMember.last_name} 
+                            <Badge variant="outline" className="ml-2 text-xs">
+                              {staffMember.role}
+                            </Badge>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div>
+                  <Label htmlFor="pin" className="text-foreground">Security PIN *</Label>
+                  <Input
+                    id="pin"
+                    type="password"
+                    value={verification.pin}
+                    onChange={(e) => setVerification(prev => ({ ...prev, pin: e.target.value }))}
+                    placeholder="Enter your security PIN"
+                    maxLength={6}
+                    className="mt-1 bg-background border-border text-foreground"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Enter your 4-6 digit security PIN
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
 
             {/* Final Confirmation */}
             <Card className="bg-green-50 border-green-200">
@@ -656,9 +761,9 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
               <CardContent className="pt-0">
                 <div className="space-y-2 text-sm text-green-700">
                   <p>✓ Package selected: {selectedPackage?.name}</p>
-                  <p>✓ Duration: {duration} month{parseInt(duration) > 1 ? 's' : ''}</p>
-                  <p>✓ Amount: ${price}</p>
-                  <p>✓ Payment method: {paymentMethod?.replace('_', ' ')}</p>
+                  <p>✓ Duration: {duration} month{duration > 1 ? 's' : ''}</p>
+                  <p>✓ Amount: ${customPrice}</p>
+                  <p>✓ Payment method: {paymentMethod === 'cash' ? 'Cash' : 'Card'}</p>
                   <p>✓ Primary member: {member.first_name} {member.last_name}</p>
                   {selectedAdditionalMembers.length > 0 && (
                     <p>✓ Additional members: {selectedAdditionalMembers.length}</p>
@@ -673,47 +778,47 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
         )}
 
         {/* Navigation Buttons */}
-        <div className="flex gap-3 pt-6 border-t">
-          {step > 1 && (
-            <Button 
-              variant="outline" 
-              onClick={() => setStep(step - 1)}
-              className="flex-1"
-            >
-              Back
-            </Button>
-          )}
+        <div className="flex justify-between pt-4 border-t border-border">
+          <div>
+            {step > 1 && (
+              <Button variant="outline" onClick={() => setStep(step - 1)}>
+                Back
+              </Button>
+            )}
+          </div>
           
-          {step < 3 ? (
-            <Button 
-              onClick={() => setStep(step + 1)}
-              disabled={
-                (step === 1 && !selectedPackage) ||
-                (step === 2 && (!duration || !price || !paymentMethod))
-              }
-              className="flex-1"
-            >
-              Next
-            </Button>
-          ) : (
-            <Button 
-              onClick={handleRenewal}
-              disabled={loading || !verification.staffId || !verification.pin}
-              className="flex-1"
-            >
-              {loading ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                  Processing...
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Process Renewal
-                </>
-              )}
-            </Button>
-          )}
+          <div className="flex gap-2">
+            {step < 3 ? (
+              <Button 
+                onClick={() => setStep(step + 1)}
+                disabled={
+                  (step === 1 && !selectedPackage) ||
+                  (step === 2 && !validateSummary())
+                }
+                className="min-w-[120px]"
+              >
+                {step === 2 ? 'Review & Verify' : 'Next'}
+              </Button>
+            ) : (
+              <Button 
+                onClick={handleRenewal}
+                disabled={!verification.staffId || !verification.pin || loading}
+                className="min-w-[120px]"
+              >
+                {loading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className="h-4 w-4 mr-2" />
+                    Process Renewal
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
         </div>
       </DialogContent>
     </Dialog>
