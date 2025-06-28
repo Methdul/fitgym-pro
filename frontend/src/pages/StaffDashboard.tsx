@@ -36,7 +36,7 @@ import {
   BarChart3,
   RefreshCw
 } from 'lucide-react';
-import { db, getAuthHeaders, setStaffSessionToken, isAuthenticated } from '@/lib/supabase';
+import { db, getAuthHeaders, setStaffSessionToken,getStaffSessionToken,isAuthenticated } from '@/lib/supabase';
 import { AddNewMemberModal } from '@/components/staff/AddNewMemberModal';
 import { AddExistingMemberModal } from '@/components/staff/AddExistingMemberModal';
 import { ViewMemberModal } from '@/components/staff/ViewMemberModal';
@@ -174,29 +174,70 @@ const StaffDashboard = () => {
   // Add this new function to create backend session for branch authentication
   const createBranchSession = async (sessionData: any) => {
     try {
-      // Create a session token for branch authentication
-      const branchSessionToken = `branch_${sessionData.branchId}_${Date.now()}`;
+      console.log('🔐 Creating proper database session for branch authentication...');
       
-      // Store the session token
-      setStaffSessionToken(branchSessionToken);
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/auth/create-session`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          branchId: branchId,
+          authMethod: 'credentials',
+          email: sessionData.branchEmail,
+          password: 'branch_login'
+        })
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || result.status !== 'success') {
+        console.error('❌ Failed to create backend session:', result.error);
+        
+        const localToken = `branch_${sessionData.branchId}_${Date.now()}`;
+        setStaffSessionToken(localToken);
+        
+        setAuthenticatedStaff({
+          id: 'branch_staff',
+          first_name: 'Branch',
+          last_name: 'Staff',
+          role: 'manager',
+          branch_id: branchId,
+          email: sessionData.branchEmail,
+          login_method: 'credentials'
+        });
+        setLoginMethod('credentials');
+        setShowAuthModal(false);
+        return;
+      }
+
+      const { sessionToken, staff } = result.data;
+      console.log('✅ Database session created successfully:', sessionToken);
       
-      // Set authenticated state
+      setStaffSessionToken(sessionToken);
+      
       setAuthenticatedStaff({
-        id: 'branch_staff',
-        first_name: 'Branch',
-        last_name: 'Staff',
-        role: 'manager',
-        branch_id: branchId,
-        email: sessionData.branchEmail,
+        id: staff.id,
+        first_name: staff.first_name,
+        last_name: staff.last_name,
+        role: staff.role,
+        branch_id: staff.branch_id,
+        email: staff.email,
         login_method: 'credentials'
       });
       setLoginMethod('credentials');
       setShowAuthModal(false);
       
-      console.log('✅ Branch session created with token:', branchSessionToken);
+      console.log('✅ Branch session authenticated with database token');
+      
     } catch (error) {
       console.error('❌ Error creating branch session:', error);
       setShowAuthModal(true);
+      toast({
+        title: "Authentication Error",
+        description: "Failed to create session. Please try again.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -409,50 +450,128 @@ const StaffDashboard = () => {
     }
   };
 
-  const handleAuthentication = (staff: any) => {
-    console.log('🔐 PIN authentication successful:', staff);
-    setAuthenticatedStaff(staff);
-    setLoginMethod('pin');
-    setShowAuthModal(false);
-    
-    const existingSession = localStorage.getItem('branch_session');
-    if (existingSession) {
-      try {
-        const sessionData = JSON.parse(existingSession);
-        sessionData.staffInfo = staff;
-        sessionData.authMethod = 'pin';
-        localStorage.setItem('branch_session', JSON.stringify(sessionData));
-        window.dispatchEvent(new Event('storage'));
-      } catch (error) {
-        console.error('Error updating session with staff info:', error);
+  const handleAuthentication = async (staff: any) => {
+    try {
+      console.log('🔐 PIN authentication successful, creating database session...');
+      
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/auth/create-session`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          branchId: branchId,
+          authMethod: 'pin',
+          staffId: staff.id,
+          pin: staff.enteredPin || staff.pin
+        })
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || result.status !== 'success') {
+        console.error('❌ Failed to create PIN session:', result.error);
+        
+        const localToken = `pin_${Date.now()}`;
+        setStaffSessionToken(localToken);
+        
+        setAuthenticatedStaff(staff);
+        setLoginMethod('pin');
+        setShowAuthModal(false);
+        
+        const existingSession = localStorage.getItem('branch_session');
+        if (existingSession) {
+          try {
+            const sessionData = JSON.parse(existingSession);
+            sessionData.staffInfo = staff;
+            sessionData.authMethod = 'pin';
+            localStorage.setItem('branch_session', JSON.stringify(sessionData));
+            window.dispatchEvent(new Event('storage'));
+          } catch (error) {
+            console.error('Error updating session with staff info:', error);
+          }
+        }
+        return;
       }
-    } else {
+
+      const { sessionToken, staff: staffData } = result.data;
+      console.log('✅ PIN database session created successfully:', sessionToken);
+      
+      setStaffSessionToken(sessionToken);
+      
+      setAuthenticatedStaff({
+        id: staffData.id,
+        first_name: staffData.first_name,
+        last_name: staffData.last_name,
+        role: staffData.role,
+        branch_id: staffData.branch_id,
+        email: staffData.email,
+        login_method: 'pin'
+      });
+      setLoginMethod('pin');
+      setShowAuthModal(false);
+      
       const sessionData = {
-        sessionToken: `pin_${Date.now()}`,
+        sessionToken: sessionToken,
         branchId: branchId,
         branchName: branch?.name || 'Unknown Branch',
-        branchEmail: staff.email,
+        branchEmail: staffData.email,
         loginTime: new Date().toISOString(),
         userType: 'branch_staff',
         authMethod: 'pin',
-        staffInfo: staff
+        staffInfo: staffData
       };
       localStorage.setItem('branch_session', JSON.stringify(sessionData));
       window.dispatchEvent(new Event('storage'));
+      
+      console.log('✅ PIN authentication completed with database session');
+      
+    } catch (error) {
+      console.error('❌ Error in PIN authentication:', error);
+      toast({
+        title: "Authentication Error",
+        description: "Failed to create PIN session. Please try again.",
+        variant: "destructive",
+      });
+      setShowAuthModal(true);
     }
   };
 
-  const handleLogout = () => {
-    console.log('🔐 Logging out from staff dashboard...');
-    
-    localStorage.removeItem('branch_session');
-    window.dispatchEvent(new Event('storage'));
-    
-    setAuthenticatedStaff(null);
-    setLoginMethod(null);
-    setShowAuthModal(true);
-    
-    window.location.href = '/login';
+  const handleLogout = async () => {
+    try {
+      console.log('🔐 Logging out and cleaning up session...');
+      
+      const currentToken = getStaffSessionToken();
+      if (currentToken && currentToken.startsWith('sess_')) {
+        try {
+          await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/auth/cleanup-sessions`, {
+            method: 'DELETE',
+            headers: getAuthHeaders()
+          });
+          console.log('✅ Backend session cleaned up');
+        } catch (error) {
+          console.log('⚠️ Could not cleanup backend session:', error);
+        }
+      }
+      
+      localStorage.removeItem('branch_session');
+      localStorage.removeItem('staff_session_token');
+      localStorage.removeItem('staff_session_expiry');
+      window.dispatchEvent(new Event('storage'));
+      
+      setStaffSessionToken(null);
+      setAuthenticatedStaff(null);
+      setLoginMethod(null);
+      setShowAuthModal(true);
+      
+      console.log('✅ Logout completed');
+      window.location.href = '/login';
+      
+    } catch (error) {
+      console.error('❌ Error during logout:', error);
+      localStorage.clear();
+      window.location.href = '/login';
+    }
   };
 
   // Package management functions

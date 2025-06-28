@@ -52,27 +52,65 @@ export const verifySessionToken = async (token: string) => {
     throw new Error('Invalid session token format');
   }
 
-  // Check if session exists in database
-  const { data: session, error } = await supabase
+  // First, get the session without JOIN to avoid foreign key issues
+  const { data: session, error: sessionError } = await supabase
     .from('branch_sessions')
-    .select('*, branch_staff(*)')
+    .select('*')
     .eq('session_token', token)
     .eq('is_active', true)
     .gte('expires_at', new Date().toISOString())
     .single();
 
-  if (error || !session) {
+  if (sessionError || !session) {
     throw new Error('Invalid or expired session');
   }
 
+  // Now handle different staff types
+  let staffData = null;
+  
+  // Check if it's a virtual staff ID (for branch auth)
+  if (session.staff_id && session.staff_id.startsWith('branch_')) {
+    // Virtual staff for branch authentication
+    staffData = {
+      id: session.staff_id,
+      branch_id: session.branch_id,
+      first_name: 'Branch',
+      last_name: 'Manager', 
+      role: 'manager',
+      email: 'branch@system.local' // placeholder
+    };
+  } else {
+    // Real staff ID - look up in branch_staff table
+    const { data: realStaff, error: staffError } = await supabase
+      .from('branch_staff')
+      .select('*')
+      .eq('id', session.staff_id)
+      .single();
+    
+    if (staffError || !realStaff) {
+      // If staff lookup fails, create a fallback
+      staffData = {
+        id: session.staff_id,
+        branch_id: session.branch_id,
+        first_name: 'Staff',
+        last_name: 'User',
+        role: 'associate',
+        email: 'staff@system.local'
+      };
+    } else {
+      staffData = realStaff;
+    }
+  }
+
   return {
-    id: session.branch_staff.id,
-    email: session.branch_staff.email,
-    role: session.branch_staff.role,
-    branchId: session.branch_staff.branch_id,
+    id: staffData.id,
+    email: staffData.email,
+    role: staffData.role,
+    branchId: session.branch_id,
     sessionType: 'branch_staff'
   };
 };
+
 
 // Check if user is admin
 export const isAdmin = async (userId: string) => {

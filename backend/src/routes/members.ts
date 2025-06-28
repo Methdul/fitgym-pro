@@ -364,7 +364,7 @@ router.delete('/:id',
         .update({ 
           status: 'suspended',
           updated_at: new Date().toISOString(),
-          deleted_by: req.user.id,
+          deleted_by: req.user.id === 'dev_bypass' ? null : req.user.id,
           deleted_at: new Date().toISOString()
         })
         .eq('id', id);
