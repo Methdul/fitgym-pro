@@ -99,7 +99,7 @@ router.get('/branch/:branchId/active',
       // Public endpoint - limited data
       const { data, error } = await supabase
         .from('packages')
-        .select('id, name, type, duration_months, features')
+        .select('id, name, type, price, duration_months, max_members, features, is_active')
         .eq('is_active', true)
         .order('price', { ascending: true });
       

@@ -84,6 +84,12 @@ const StaffDashboard = () => {
     features: [] as string[]
   });
 
+  // ADD these state variables at the top of your StaffDashboard component with other useState declarations:
+
+  const [deleteStaffId, setDeleteStaffId] = useState<string>('');
+  const [deletePin, setDeletePin] = useState<string>('');
+  const [isVerifyingDeletion, setIsVerifyingDeletion] = useState(false);
+
   // Helper function to get the ACTUAL status of a member based on expiry date
   const getActualMemberStatus = (member: Member) => {
     const now = new Date();
@@ -385,44 +391,53 @@ const StaffDashboard = () => {
     }
   };
 
-  const handleDeleteMember = async () => {
-    if (!memberToDelete) return;
+  const handleDeleteMemberWithVerification = async () => {
+    if (!memberToDelete || !deleteStaffId || deletePin.length !== 4) {
+      toast({
+        title: "Validation Error", 
+        description: "Please select a staff member and enter their 4-digit PIN",
+        variant: "destructive",
+      });
+      return;
+    }
 
     // Check authentication before making request
     if (!isAuthenticated()) {
       toast({
         title: "Authentication Required",
-        description: "Please log in again to continue",
+        description: "Please log in again to continue", 
         variant: "destructive",
       });
       setShowAuthModal(true);
       return;
     }
 
+    setIsVerifyingDeletion(true);
+
     try {
+      console.log(`🗑️ Requesting member deletion with staff verification...`);
+      
       const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/members/${memberToDelete.id}`, {
         method: 'DELETE',
-        headers: getAuthHeaders(),
+        headers: {
+          ...getAuthHeaders(),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          staffId: deleteStaffId,
+          pin: deletePin
+        })
       });
 
       if (!response.ok) {
-        console.error(`❌ HTTP Error: ${response.status} ${response.statusText}`);
-        
-        let errorMessage = `Failed to delete member (${response.status})`;
-        try {
-          const errorData = await response.json();
-          errorMessage = errorData.error || errorData.message || errorMessage;
-        } catch {
-          errorMessage = `${response.status}: ${response.statusText}`;
-        }
-        
-        throw new Error(errorMessage);
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to delete member');
       }
 
       const result = await response.json();
 
       if (result.status === 'success') {
-        console.log('✅ Member deleted successfully');
+        console.log('✅ Member deleted successfully with staff verification');
         
         if (branchId) {
           const { data } = await db.members.getByBranch(branchId);
@@ -431,22 +446,35 @@ const StaffDashboard = () => {
         
         setDeleteConfirmOpen(false);
         setMemberToDelete(null);
+        setDeleteStaffId('');
+        setDeletePin('');
 
         toast({
           title: "Member Deleted",
           description: `${memberToDelete.first_name} ${memberToDelete.last_name} has been deleted successfully`,
         });
       } else {
-        console.error('❌ Failed to delete member:', result.error);
         throw new Error(result.error || 'Failed to delete member');
       }
     } catch (error) {
       console.error('❌ Error deleting member:', error);
+      
+      let errorMessage = 'Failed to delete member';
+      if (error instanceof Error) {
+        if (error.message.includes('Invalid PIN')) {
+          errorMessage = 'Invalid PIN for selected staff member';
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
       toast({
-        title: "Error",
-        description: `Failed to delete member: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        title: "Delete Failed",
+        description: errorMessage,
         variant: "destructive",
       });
+    } finally {
+      setIsVerifyingDeletion(false);
     }
   };
 
@@ -1702,22 +1730,24 @@ const StaffDashboard = () => {
         )}
 
         {/* Delete Confirmation Dialog */}
+        {/* Enhanced Delete Confirmation Dialog with Staff Verification */}
         <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
-          <DialogContent className="sm:max-w-[425px]">
+          <DialogContent className="sm:max-w-[500px]">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Trash2 className="h-5 w-5 text-red-500" />
-                Delete Member
+                Delete Member - Verification Required
               </DialogTitle>
               <DialogDescription>
-                Are you sure you want to delete this member? This action cannot be undone.
+                To delete this member, select a staff member and enter their PIN for authorization.
               </DialogDescription>
             </DialogHeader>
             
             {memberToDelete && (
-              <div className="py-4">
+              <div className="py-4 space-y-4">
+                {/* Member Info */}
                 <div className="bg-muted p-4 rounded-lg">
-                  <h4 className="font-medium mb-2">Member Details:</h4>
+                  <h4 className="font-medium mb-2">Member to Delete:</h4>
                   <div><strong>Name:</strong> {memberToDelete.first_name} {memberToDelete.last_name}</div>
                   <div><strong>Email:</strong> {memberToDelete.email}</div>
                   <div><strong>Phone:</strong> {memberToDelete.phone}</div>
@@ -1728,6 +1758,38 @@ const StaffDashboard = () => {
                     </Badge>
                   </div>
                 </div>
+
+                {/* Staff Selection */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Select Authorizing Staff Member:</label>
+                  <select 
+                    value={deleteStaffId}
+                    onChange={(e) => setDeleteStaffId(e.target.value)}
+                    className="w-full p-2 border rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-600"
+                    disabled={isVerifyingDeletion}
+                  >
+                    <option value="" className="text-gray-500">Choose staff member...</option>
+                    {staff.map((staffMember) => (
+                      <option key={staffMember.id} value={staffMember.id} className="text-gray-900 dark:text-gray-100">
+                        {staffMember.first_name} {staffMember.last_name} ({staffMember.role})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* PIN Input */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Enter Staff PIN:</label>
+                  <input
+                    type="password"
+                    placeholder="Enter 4-digit PIN"
+                    value={deletePin}
+                    onChange={(e) => setDeletePin(e.target.value.slice(0, 4))}
+                    className="w-full p-2 border rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-600 placeholder-gray-500"
+                    maxLength={4}
+                    disabled={isVerifyingDeletion}
+                  />
+                </div>
               </div>
             )}
 
@@ -1737,17 +1799,30 @@ const StaffDashboard = () => {
                 onClick={() => {
                   setDeleteConfirmOpen(false);
                   setMemberToDelete(null);
+                  setDeleteStaffId('');
+                  setDeletePin('');
                 }}
+                disabled={isVerifyingDeletion}
               >
                 Cancel
               </Button>
               <Button 
                 variant="destructive" 
-                onClick={handleDeleteMember}
+                onClick={handleDeleteMemberWithVerification}
+                disabled={!deleteStaffId || deletePin.length !== 4 || isVerifyingDeletion}
                 className="bg-red-600 hover:bg-red-700"
               >
-                <Trash2 className="h-4 w-4 mr-2" />
-                Delete Member
+                {isVerifyingDeletion ? (
+                  <>
+                    <span className="animate-spin mr-2">⏳</span>
+                    Verifying...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete Member
+                  </>
+                )}
               </Button>
             </DialogFooter>
           </DialogContent>

@@ -83,31 +83,25 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
   const [createdAccounts, setCreatedAccounts] = useState<any[]>([]);
 
   // Initialize member forms when package is selected
+// Initialize member forms when package is selected
   useEffect(() => {
-    if (selectedPackage) {
+    if (selectedPackage && selectedPackage.max_members) {
       console.log('Initializing forms for package:', selectedPackage.name, 'max_members:', selectedPackage.max_members);
-      const newForms: MemberFormData[] = Array.from(
-        { length: selectedPackage.max_members || 1 },
-        () => ({
-          isExisting: false,
-          firstName: '',
-          lastName: '',
-          email: '',
-          phone: '',
-          address: '',
-          emergencyContact: '',
-          emergencyPhone: '',
-          nationalId: ''
-        })
-      );
-      setMemberForms(newForms);
+      
+      const formsArray = Array(selectedPackage.max_members).fill(null).map(() => ({
+        isExisting: false,
+        firstName: '',
+        lastName: '',
+        email: '',
+        phone: '',
+        address: '',
+        emergencyContact: '',
+        emergencyPhone: '',
+        nationalId: ''
+      }));
+      
+      setMemberForms(formsArray);
       setCurrentMemberIndex(0);
-      
-      // Set initial price
-      const totalPrice = selectedPackage.price * duration;
-      setCustomPrice(totalPrice.toString());
-      
-      console.log('Created member forms:', newForms.length, 'Initial price:', totalPrice);
     }
   }, [selectedPackage]);
 

@@ -324,15 +324,22 @@ router.delete('/:id',
   strictRateLimit,
   authenticate,
   requirePermission(Permission.MEMBERS_DELETE), // Only users with delete permission
-  [validateUUID('id'), handleValidationErrors],
+  [
+    validateUUID('id'), 
+    body('staffId').isUUID().withMessage('Valid staff ID required for verification'),
+    body('pin').isLength({ min: 4, max: 4 }).isNumeric().withMessage('Valid 4-digit PIN required'),
+    handleValidationErrors
+  ],
   auditLog('DELETE_MEMBER', 'member'),
   async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
+      const { staffId, pin } = req.body;
       
-      console.log(`🗑️ Deleting member: ${id}`);
+      console.log(`🗑️ Deleting member: ${id} with staff verification`);
+      console.log(`🔐 Verifying staff: ${staffId} with PIN: ${'*'.repeat(pin.length)}`);
       
-      // Verify member exists and get branch info
+      // Step 1: Verify member exists and get branch info
       const { data: member, error: fetchError } = await supabase
         .from('members')
         .select('id, first_name, last_name, branch_id, email')
@@ -346,7 +353,45 @@ router.delete('/:id',
         });
       }
       
-      // Verify branch access
+      // Step 2: Verify staff exists and PIN matches
+      const { data: staff, error: staffError } = await supabase
+        .from('branch_staff')
+        .select('*')
+        .eq('id', staffId)
+        .eq('branch_id', member.branch_id) // Ensure staff belongs to same branch
+        .single();
+      
+      if (staffError || !staff) {
+        return res.status(404).json({
+          status: 'error',
+          error: 'Staff member not found or not authorized for this branch'
+        });
+      }
+      
+      // Step 3: Verify PIN (check both plain text and hashed versions for compatibility)
+      let pinValid = false;
+      if (staff.pin === pin) {
+        pinValid = true;
+      } else if (staff.pin_hash) {
+        try {
+          const bcrypt = require('bcrypt');
+          pinValid = await bcrypt.compare(pin, staff.pin_hash);
+        } catch (error) {
+          console.log('PIN hash comparison failed, checking plain text');
+          pinValid = staff.pin === pin;
+        }
+      }
+      
+      if (!pinValid) {
+        return res.status(401).json({
+          status: 'error',
+          error: 'Invalid PIN for selected staff member'
+        });
+      }
+      
+      console.log(`✅ PIN verified for staff: ${staff.first_name} ${staff.last_name}`);
+      
+      // Step 4: Verify branch access (existing RBAC check)
       const userPermissions = await rbacUtils.getUserPermissions(req.user);
       if (!rbacUtils.hasPermission(userPermissions, Permission.BRANCHES_MANAGE_ALL)) {
         if (req.user.sessionType === 'branch_staff' && req.user.branchId !== member.branch_id) {
@@ -358,13 +403,13 @@ router.delete('/:id',
         }
       }
       
-      // Soft delete (update status instead of hard delete)
+      // Step 5: Soft delete (update status instead of hard delete)
       const { error } = await supabase
         .from('members')
         .update({ 
           status: 'suspended',
           updated_at: new Date().toISOString(),
-          deleted_by: req.user.id === 'dev_bypass' ? null : req.user.id,
+          deleted_by: staffId, // Use the verified staff ID
           deleted_at: new Date().toISOString()
         })
         .eq('id', id);
@@ -374,11 +419,16 @@ router.delete('/:id',
         throw new Error('Failed to delete member');
       }
       
-      console.log('✅ Member deleted (suspended) successfully');
+      console.log(`✅ Member deleted successfully by staff: ${staff.first_name} ${staff.last_name}`);
       
       res.json({
         status: 'success',
-        message: 'Member deleted successfully'
+        message: 'Member deleted successfully',
+        deletedBy: {
+          staffId: staff.id,
+          staffName: `${staff.first_name} ${staff.last_name}`,
+          staffRole: staff.role
+        }
       });
       
     } catch (error) {
