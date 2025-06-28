@@ -56,6 +56,7 @@ router.get('/branch/:branchId',
       const { data, error } = await supabase
         .from('packages')
         .select(selectFields)
+        .eq('branch_id', branchId) 
         .eq('is_active', true)
         .order('price', { ascending: true });
       
@@ -101,6 +102,7 @@ router.get('/branch/:branchId/active',
       const { data, error } = await supabase
         .from('packages')
         .select('id, name, type, price, duration_months, max_members, features, is_active')
+        .eq('branch_id', branchId) 
         .eq('is_active', true)
         .order('price', { ascending: true });
       
