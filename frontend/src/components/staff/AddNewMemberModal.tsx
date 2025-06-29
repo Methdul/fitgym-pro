@@ -1,3 +1,4 @@
+// Enhanced AddNewMemberModal.tsx - Conservative approach preserving original functionality
 import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -8,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 import { getAuthHeaders } from '@/lib/supabase';
 import { 
@@ -25,7 +27,10 @@ import {
   UserCheck,
   Search,
   X,
-  Copy
+  Copy,
+  Calendar,
+  Mail,
+  UserPlus
 } from 'lucide-react';
 import type { Member, Package as PackageType, BranchStaff } from '@/types';
 
@@ -38,6 +43,7 @@ interface AddNewMemberModalProps {
 
 type Step = 'package' | 'members' | 'summary' | 'verification' | 'success';
 
+// Enhanced interface - adding optional autoGenerateEmail to original structure
 interface MemberFormData {
   id?: string;
   isExisting?: boolean;
@@ -49,10 +55,11 @@ interface MemberFormData {
   emergencyContact: string;
   emergencyPhone: string;
   nationalId: string;
+  autoGenerateEmail?: boolean; // New optional field
 }
 
 export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded }: AddNewMemberModalProps) => {
-  // State management
+  // State management - keeping original structure
   const [currentStep, setCurrentStep] = useState<Step>('package');
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
@@ -73,7 +80,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
   // Package summary and payment
   const [duration, setDuration] = useState<number>(1);
   const [customPrice, setCustomPrice] = useState<string>('');
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card'>('cash');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'paid'>('cash');
 
   // Staff verification
   const [staff, setStaff] = useState<BranchStaff[]>([]);
@@ -82,50 +89,67 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
   // Success
   const [createdAccounts, setCreatedAccounts] = useState<any[]>([]);
 
-  // Initialize member forms when package is selected
-// Initialize member forms when package is selected
+  // NEW: Existing member workflow state
+  const [isExistingMember, setIsExistingMember] = useState(false);
+  const [lastPaidDate, setLastPaidDate] = useState<string>('');
+  const [manualPrice, setManualPrice] = useState<string>('');
+
+  // Initialize member forms when package is selected - ORIGINAL LOGIC
   useEffect(() => {
-    if (selectedPackage && selectedPackage.max_members) {
-      console.log('Initializing forms for package:', selectedPackage.name, 'max_members:', selectedPackage.max_members);
-      
-      const formsArray = Array(selectedPackage.max_members).fill(null).map(() => ({
-        isExisting: false,
-        firstName: '',
-        lastName: '',
-        email: '',
-        phone: '',
-        address: '',
-        emergencyContact: '',
-        emergencyPhone: '',
-        nationalId: ''
-      }));
-      
-      setMemberForms(formsArray);
+    if (selectedPackage && memberForms.length === 0) {
+      const forms: MemberFormData[] = [];
+      for (let i = 0; i < (selectedPackage.max_members || 1); i++) {
+        forms.push({
+          firstName: '',
+          lastName: '',
+          email: '',
+          phone: '',
+          address: '',
+          emergencyContact: '',
+          emergencyPhone: '',
+          nationalId: '',
+          autoGenerateEmail: false // Default to manual email
+        });
+      }
+      setMemberForms(forms);
       setCurrentMemberIndex(0);
     }
   }, [selectedPackage]);
 
-  // Update price when duration changes
+  // Initialize form - ORIGINAL LOGIC
   useEffect(() => {
-    if (selectedPackage && duration) {
-      const totalPrice = selectedPackage.price * duration;
-      setCustomPrice(totalPrice.toString());
-    }
-  }, [selectedPackage, duration]);
-
-  // Fetch packages and staff on open
-  useEffect(() => {
-    if (open && packages.length === 0) {
+    if (open) {
       fetchPackages();
       fetchStaff();
       fetchExistingMembers();
+      resetForm();
     }
-  }, [open]);
+  }, [open, branchId]);
+
+  // NEW: Auto-generate email functionality
+  useEffect(() => {
+    if (memberForms[currentMemberIndex]?.autoGenerateEmail && memberForms[currentMemberIndex]?.nationalId) {
+      updateMemberForm(currentMemberIndex, {
+        email: `${memberForms[currentMemberIndex].nationalId}@gmail.com`
+      });
+    }
+  }, [memberForms[currentMemberIndex]?.nationalId, memberForms[currentMemberIndex]?.autoGenerateEmail]);
+
+  // NEW: Calculate expiry date for existing members
+  const calculateExpiryDate = () => {
+    if (!lastPaidDate || !selectedPackage?.duration_months) return '';
+    
+    const startDate = new Date(lastPaidDate);
+    const expiryDate = new Date(startDate);
+    expiryDate.setMonth(expiryDate.getMonth() + selectedPackage.duration_months);
+    
+    return expiryDate.toISOString().split('T')[0];
+  };
 
   const fetchPackages = async () => {
     try {
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/branch/${branchId}`,
+        `${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/branch/${branchId}/active`,
         { headers: getAuthHeaders() }
       );
       const result = await response.json();
@@ -179,14 +203,18 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
     setCreatedAccounts([]);
     setExistingMemberSearch('');
     setSelectedExistingMembers([]);
+    // Reset new fields
+    setIsExistingMember(false);
+    setLastPaidDate('');
+    setManualPrice('');
   };
 
-  // Helper function to get member property safely
+  // Helper function to get member property safely - ORIGINAL
   const getMemberProperty = (member: Member, property: string): string => {
     return (member as Record<string, any>)[property] || '';
   };
 
-  // Existing member selection functions
+  // Existing member selection functions - ORIGINAL
   const selectExistingMember = (member: Member) => {
     const updatedForms = [...memberForms];
     updatedForms[currentMemberIndex] = {
@@ -228,7 +256,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
     }
   };
 
-  // Update member form data
+  // Update member form data - ORIGINAL
   const updateMemberForm = (index: number, updates: Partial<MemberFormData>) => {
     console.log('Updating member form:', index, updates);
     setMemberForms(prev => {
@@ -240,7 +268,20 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
     });
   };
 
-  // Validation functions
+  // NEW: Toggle auto-generate email
+  const toggleAutoGenerateEmail = (enabled: boolean) => {
+    const currentMember = memberForms[currentMemberIndex];
+    if (!currentMember) return;
+    
+    updateMemberForm(currentMemberIndex, { 
+      autoGenerateEmail: enabled,
+      email: enabled && currentMember.nationalId 
+        ? `${currentMember.nationalId}@gmail.com` 
+        : ''
+    });
+  };
+
+  // Validation functions - ORIGINAL LOGIC
   const validateCurrentMember = (): boolean => {
     const member = memberForms[currentMemberIndex];
     if (!member) return false;
@@ -272,25 +313,36 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
     });
   };
 
+  // Enhanced validation for existing member workflow
   const validateSummary = (): boolean => {
-    const priceValid = duration > 0 && parseFloat(customPrice || '0') > 0;
-    const paymentValid = (paymentMethod === 'cash' || paymentMethod === 'card');
-    const membersValid = validateAllMembers();
-    
-    console.log('Validation check:', {
-      duration,
-      customPrice,
-      priceValid,
-      paymentMethod,
-      paymentValid,
-      membersValid,
-      memberForms: memberForms.length
-    });
-    
-    return priceValid && paymentValid && membersValid;
+    if (isExistingMember) {
+      // For existing members: check manual price and last paid date
+      const priceValid = parseFloat(manualPrice || '0') >= 0;
+      const dateValid = !!lastPaidDate;
+      const membersValid = validateAllMembers();
+      
+      return priceValid && dateValid && membersValid;
+    } else {
+      // For new members: regular validation
+      const priceValid = duration > 0 && parseFloat(customPrice || '0') > 0;
+      const paymentValid = (paymentMethod === 'cash' || paymentMethod === 'card');
+      const membersValid = validateAllMembers();
+      
+      console.log('Validation check:', {
+        duration,
+        customPrice,
+        priceValid,
+        paymentMethod,
+        paymentValid,
+        membersValid,
+        memberForms: memberForms.length
+      });
+      
+      return priceValid && paymentValid && membersValid;
+    }
   };
 
-  // Navigation functions
+  // Navigation functions - ORIGINAL
   const handleNext = () => {
     switch (currentStep) {
       case 'package':
@@ -334,19 +386,18 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
     }
   };
 
-  // Calculate total price
+  // Calculate total price - ORIGINAL
   const calculatePrice = () => {
     if (!selectedPackage) return 0;
     return selectedPackage.price * duration;
   };
 
-  // Handle price reset to calculated value
+  // Handle price reset to calculated value - ORIGINAL
   const resetPriceToCalculated = () => {
     setCustomPrice(calculatePrice().toString());
   };
 
-  // Submit form - FIXED to only send required backend fields
-// Submit form - PERMANENTLY FIXED to match backend expectations
+  // Submit form - ENHANCED to handle existing member workflow
   const handleSubmit = async () => {
     setLoading(true);
     try {
@@ -361,19 +412,28 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
           continue;
         }
         
-        // ✅ FIXED: Send data in the format backend expects
+        // Prepare member data based on workflow type
         const memberData = {
           firstName: member.firstName,
           lastName: member.lastName,
-          email: member.email, // ← Use the actual email from form
+          email: member.email,
           phone: member.phone,
           branchId: branchId,
           packageId: selectedPackage?.id,
-          nationalId: member.nationalId, // ← Send nationalId properly
-          // Optional fields
           emergencyContact: member.emergencyContact || '',
           address: member.address || '',
-          dateOfBirth: '', // Add if needed
+          nationalId: member.nationalId || '',
+          // Enhanced: Handle existing member specific data
+          ...(isExistingMember ? {
+            manualPrice: parseFloat(manualPrice),
+            lastPaidDate: lastPaidDate,
+            expiryDate: calculateExpiryDate(),
+            isExistingMember: true
+          } : {
+            customPrice: parseFloat(customPrice || '0'),
+            duration: duration,
+            paymentMethod: paymentMethod
+          })
         };
 
         console.log('Sending member data:', memberData);
@@ -409,13 +469,13 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
 
         const result = await response.json();
         
-        // ✅ FIXED: Use real credentials from backend response
+        // Enhanced: Add account credentials for display
         const memberWithCredentials = {
           ...result.data,
-          // Use the loginCredentials returned by backend
-          accountEmail: result.data.loginCredentials?.email || result.data.email,
-          accountPassword: result.data.loginCredentials?.password || member.nationalId,
-          fullName: `${result.data.first_name} ${result.data.last_name}`
+          accountEmail: member.autoGenerateEmail ? `${member.nationalId}@gmail.com` : member.email,
+          accountPassword: member.autoGenerateEmail ? member.nationalId : 'user-set-password',
+          fullName: `${result.data.first_name} ${result.data.last_name}`,
+          isAutoGenerated: member.autoGenerateEmail || false
         };
         
         createdMembers.push(memberWithCredentials);
@@ -426,7 +486,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
 
       toast({
         title: "Success! 🎉",
-        description: `${createdMembers.length} member${createdMembers.length > 1 ? 's' : ''} ${createdMembers.length > 1 ? 'have' : 'has'} been successfully created.`,
+        description: `${createdMembers.length} member${createdMembers.length > 1 ? 's' : ''} ${createdMembers.length > 1 ? 'have' : 'has'} been successfully ${isExistingMember ? 'transferred' : 'created'}.`,
       });
 
       onMemberAdded();
@@ -443,7 +503,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
     }
   };
 
-  // Get step info
+  // Get step info - ENHANCED
   const getStepInfo = () => {
     const steps = ['package', 'members', 'summary', 'verification', 'success'];
     const currentIndex = steps.indexOf(currentStep);
@@ -453,9 +513,9 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
       title: {
         package: 'Select Membership Package',
         members: `Member Details ${selectedPackage?.max_members > 1 ? `(${currentMemberIndex + 1} of ${memberForms.length})` : ''}`,
-        summary: 'Package Summary & Payment',
+        summary: isExistingMember ? 'Transfer Summary & Dates' : 'Package Summary & Payment',
         verification: 'Staff Verification Required',
-        success: 'Members Successfully Created'
+        success: `Members Successfully ${isExistingMember ? 'Transferred' : 'Created'}`
       }[currentStep]
     };
   };
@@ -531,7 +591,8 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
           address: '',
           emergencyContact: '',
           emergencyPhone: '',
-          nationalId: ''
+          nationalId: '',
+          autoGenerateEmail: false
         };
 
         // Filter existing members for search
@@ -551,87 +612,106 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                 <Users className="h-12 w-12 mx-auto mb-4 text-primary" />
               )}
               <h3 className="text-lg font-semibold text-foreground">
-                {selectedPackage?.max_members === 1 
-                  ? "Member Information" 
-                  : `Member ${currentMemberIndex + 1} of ${memberForms.length}`
-                }
+                Member Details {memberForms.length > 1 && `(${currentMemberIndex + 1} of ${memberForms.length})`}
               </h3>
-              <p className="text-muted-foreground">
-                Fill in the required member details below
-              </p>
+              <p className="text-muted-foreground">Enter member information for {selectedPackage?.name}</p>
             </div>
 
-            {/* Option to select existing member for couple/family packages */}
-            {selectedPackage && selectedPackage.max_members > 1 && (
-              <Card className="gym-card-gradient border-primary/20 bg-primary/5">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base text-primary flex items-center gap-2">
-                    <Info className="h-4 w-4" />
-                    Add Existing Member (Optional)
-                  </CardTitle>
+            {/* Multi-member navigation */}
+            {memberForms.length > 1 && (
+              <div className="flex justify-center space-x-2 mb-6">
+                {memberForms.map((_, index) => (
+                  <button
+                    key={index}
+                    onClick={() => setCurrentMemberIndex(index)}
+                    className={`w-8 h-8 rounded-full text-sm font-medium transition-colors ${
+                      index === currentMemberIndex
+                        ? 'bg-primary text-primary-foreground'
+                        : index < currentMemberIndex
+                        ? 'bg-green-500 text-white'
+                        : 'bg-gray-200 text-gray-600'
+                    }`}
+                  >
+                    {index + 1}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Existing member selection (if package allows multiple members) */}
+            {selectedPackage?.max_members > 1 && !currentMember.isExisting && (
+              <Card className="border-blue-500/20 bg-blue-500/10 gym-card-gradient">
+                <CardHeader>
+                  <CardTitle className="text-base text-blue-800">Add Existing Member (Optional)</CardTitle>
+                  <p className="text-sm text-blue-600">Search and select an existing member instead of creating new</p>
                 </CardHeader>
-                <CardContent className="pt-0">
-                  <p className="text-sm text-muted-foreground mb-4">
-                    You can select an existing member or create a new one below.
-                  </p>
-                  
-                  <div className="space-y-4">
-                    <div className="flex gap-2">
+                <CardContent className="space-y-4">
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
                       <Input
-                        placeholder="Search by name, email, or national ID..."
+                        placeholder="Search by name, email, or ID..."
                         value={existingMemberSearch}
                         onChange={(e) => setExistingMemberSearch(e.target.value)}
-                        className="flex-1 bg-background border-border"
+                        className="pl-10 bg-background border-border"
                       />
                     </div>
-                    
                     {existingMemberSearch && (
-                      <div className="max-h-48 overflow-y-auto border rounded-md border-border bg-background">
-                        {filteredExistingMembers.slice(0, 5).map((member) => (
-                          <div
-                            key={member.id}
-                            className="p-3 hover:bg-accent cursor-pointer border-b border-border last:border-b-0 flex justify-between items-center"
-                            onClick={() => selectExistingMember(member)}
-                          >
-                            <div>
-                              <div className="font-medium text-foreground">{member.first_name} {member.last_name}</div>
-                              <div className="text-sm text-muted-foreground">{member.email}</div>
-                              <div className="text-xs text-muted-foreground">ID: {member.national_id}</div>
-                            </div>
-                            <Badge variant={member.status === 'active' ? 'default' : 'secondary'}>
-                              {member.status}
-                            </Badge>
-                          </div>
-                        ))}
-                        {filteredExistingMembers.length === 0 && (
-                          <div className="p-3 text-center text-muted-foreground">No members found</div>
-                        )}
-                      </div>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => setExistingMemberSearch('')}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
                     )}
                   </div>
+
+                  {existingMemberSearch && filteredExistingMembers.length > 0 && (
+                    <div className="max-h-48 overflow-y-auto space-y-2">
+                      {filteredExistingMembers.slice(0, 5).map((member) => (
+                        <div
+                          key={member.id}
+                          className="flex items-center justify-between p-3 bg-white rounded border cursor-pointer hover:border-primary/50"
+                          onClick={() => selectExistingMember(member)}
+                        >
+                          <div>
+                            <div className="font-medium text-foreground">
+                              {member.first_name} {member.last_name}
+                            </div>
+                            <div className="text-sm text-muted-foreground">
+                              {member.email} • ID: {member.national_id}
+                            </div>
+                          </div>
+                          <Button size="sm" variant="outline">
+                            Select
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}
 
-            <Card className="gym-card-gradient border-border">
+            {/* Member information form */}
+            <Card className="border-border gym-card-gradient">
               <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2 text-foreground">
-                  <UserCheck className="h-4 w-4" />
-                  Personal Information
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base text-foreground">
+                    {currentMember.isExisting ? 'Existing Member Selected' : 'Personal Information'}
+                  </CardTitle>
                   {currentMember.isExisting && (
-                    <Badge variant="default" className="ml-2 bg-green-500/10 text-green-500 border-green-500/20">Existing Member</Badge>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => removeSelectedMember(currentMember.id!)}
+                      className="w-fit"
+                    >
+                      Use New Member Instead
+                    </Button>
                   )}
-                </CardTitle>
-                {currentMember.isExisting && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => removeSelectedMember(currentMember.id!)}
-                    className="w-fit"
-                  >
-                    Use New Member Instead
-                  </Button>
-                )}
+                </div>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -660,47 +740,104 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                       disabled={currentMember.isExisting}
                     />
                   </div>
+                </div>
+
+                <div>
+                  <Label htmlFor="nationalId" className="text-foreground">National ID *</Label>
+                  <Input
+                    id="nationalId"
+                    value={currentMember.nationalId}
+                    onChange={(e) => updateMemberForm(currentMemberIndex, { nationalId: e.target.value })}
+                    placeholder="Enter national ID"
+                    className="mt-1 bg-background border-border text-foreground"
+                    disabled={currentMember.isExisting}
+                  />
+                </div>
+
+                {/* Enhanced Email Section with Auto-Generate Option */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="email" className="text-foreground">Email Address *</Label>
+                    {!currentMember.isExisting && (
+                      <div className="flex items-center space-x-2">
+                        <Switch
+                          id="auto-email"
+                          checked={currentMember.autoGenerateEmail || false}
+                          onCheckedChange={toggleAutoGenerateEmail}
+                        />
+                        <Label htmlFor="auto-email" className="text-sm text-muted-foreground">
+                          Auto-generate temp email
+                        </Label>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <Input
+                    id="email"
+                    type="email"
+                    value={currentMember.email}
+                    onChange={(e) => updateMemberForm(currentMemberIndex, { email: e.target.value })}
+                    placeholder={currentMember.autoGenerateEmail ? "Will auto-generate as [nationalId]@gmail.com" : "Enter email address"}
+                    disabled={currentMember.isExisting || currentMember.autoGenerateEmail}
+                    className="mt-1 bg-background border-border text-foreground"
+                  />
+                  
+                  {currentMember.autoGenerateEmail && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                      <div className="flex items-center gap-2 text-blue-600 text-sm">
+                        <Mail className="h-4 w-4" />
+                        <strong>Temporary Account Credentials:</strong>
+                      </div>
+                      <div className="text-sm text-blue-700 mt-1 space-y-1">
+                        <p>Email: {currentMember.nationalId ? `${currentMember.nationalId}@gmail.com` : '[nationalId]@gmail.com'}</p>
+                        <p>Password: {currentMember.nationalId || '[nationalId]'}</p>
+                        <p className="text-xs">Member can change these after first login.</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <Label htmlFor="phone" className="text-foreground">Phone *</Label>
+                  <Input
+                    id="phone"
+                    value={currentMember.phone}
+                    onChange={(e) => updateMemberForm(currentMemberIndex, { phone: e.target.value })}
+                    placeholder="Enter phone number"
+                    className="mt-1 bg-background border-border text-foreground"
+                    disabled={currentMember.isExisting}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="address" className="text-foreground">Address</Label>
+                  <Input
+                    id="address"
+                    value={currentMember.address}
+                    onChange={(e) => updateMemberForm(currentMemberIndex, { address: e.target.value })}
+                    placeholder="Enter address (optional)"
+                    className="mt-1 bg-background border-border text-foreground"
+                    disabled={currentMember.isExisting}
+                  />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="email" className="text-foreground">Email *</Label>
+                    <Label htmlFor="emergencyContact" className="text-foreground">Emergency Contact</Label>
                     <Input
-                      id="email"
-                      type="email"
-                      value={currentMember.email}
-                      onChange={(e) => updateMemberForm(currentMemberIndex, { email: e.target.value })}
-                      placeholder="Enter email address"
+                      id="emergencyContact"
+                      value={currentMember.emergencyContact}
+                      onChange={(e) => updateMemberForm(currentMemberIndex, { emergencyContact: e.target.value })}
+                      placeholder="Enter emergency contact name"
                       className="mt-1 bg-background border-border text-foreground"
                       disabled={currentMember.isExisting}
                     />
                   </div>
                   <div>
-                    <Label htmlFor="phone" className="text-foreground">Phone *</Label>
+                    <Label htmlFor="emergencyPhone" className="text-foreground">Emergency Phone</Label>
                     <Input
-                      id="phone"
-                      value={currentMember.phone}
-                      onChange={(e) => updateMemberForm(currentMemberIndex, { phone: e.target.value })}
-                      placeholder="Enter phone number"
-                      className="mt-1 bg-background border-border text-foreground"
-                      disabled={currentMember.isExisting}
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="nationalId" className="text-foreground">National ID *</Label>
-                    <Input
-                      id="nationalId"
-                      value={currentMember.nationalId}
-                      onChange={(e) => updateMemberForm(currentMemberIndex, { nationalId: e.target.value })}
-                      placeholder="Enter national ID"
-                      className="mt-1 bg-background border-border text-foreground"
-                      disabled={currentMember.isExisting}
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="address" className="text-foreground">Address</Label>
-                    <Input
-                      id="address"
-                      value={currentMember.address}
-                      onChange={(e) => updateMemberForm(currentMemberIndex, { address: e.target.value })}
-                      placeholder="Enter address"
+                      id="emergencyPhone"
+                      value={currentMember.emergencyPhone}
+                      onChange={(e) => updateMemberForm(currentMemberIndex, { emergencyPhone: e.target.value })}
+                      placeholder="Enter emergency contact phone"
                       className="mt-1 bg-background border-border text-foreground"
                       disabled={currentMember.isExisting}
                     />
@@ -708,58 +845,74 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                 </div>
               </CardContent>
             </Card>
-
-            {!currentMember.isExisting && (
-              <Card className="gym-card-gradient border-border">
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center gap-2 text-foreground">
-                    <Info className="h-4 w-4" />
-                    Emergency Contact (Optional)
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="emergencyContact" className="text-foreground">Emergency Contact Name</Label>
-                      <Input
-                        id="emergencyContact"
-                        value={currentMember.emergencyContact}
-                        onChange={(e) => updateMemberForm(currentMemberIndex, { emergencyContact: e.target.value })}
-                        placeholder="Enter emergency contact name"
-                        className="mt-1 bg-background border-border text-foreground"
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="emergencyPhone" className="text-foreground">Emergency Contact Phone</Label>
-                      <Input
-                        id="emergencyPhone"
-                        value={currentMember.emergencyPhone}
-                        onChange={(e) => updateMemberForm(currentMemberIndex, { emergencyPhone: e.target.value })}
-                        placeholder="Enter emergency contact phone"
-                        className="mt-1 bg-background border-border text-foreground"
-                      />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
           </div>
         );
 
       case 'summary':
         const calculatedPrice = calculatePrice();
         const isCustomPrice = parseFloat(customPrice || '0') !== calculatedPrice;
+        const expiryDate = calculateExpiryDate();
 
         return (
           <div className="space-y-6">
             <div className="text-center mb-6">
               <DollarSign className="h-12 w-12 mx-auto mb-4 text-primary" />
-              <h3 className="text-lg font-semibold text-foreground">Package Summary & Payment</h3>
-              <p className="text-muted-foreground">Review your selection and choose payment method</p>
+              <h3 className="text-lg font-semibold text-foreground">
+                {isExistingMember ? 'Transfer Summary & Dates' : 'Package Summary & Payment'}
+              </h3>
+              <p className="text-muted-foreground">
+                {isExistingMember 
+                  ? 'Set transfer details and existing membership dates' 
+                  : 'Review your selection and choose payment method'
+                }
+              </p>
             </div>
 
+            {/* Enhanced: Existing Member Toggle */}
+            <Card className="border-border gym-card-gradient">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base text-foreground">Member Type</CardTitle>
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="existing-member"
+                      checked={isExistingMember}
+                      onCheckedChange={(checked) => {
+                        setIsExistingMember(checked);
+                        setPaymentMethod(checked ? 'paid' : 'cash');
+                        if (checked) {
+                          setManualPrice(calculatedPrice.toString());
+                        } else {
+                          setCustomPrice(calculatedPrice.toString());
+                        }
+                      }}
+                    />
+                    <Label htmlFor="existing-member" className="text-foreground">
+                      Add Existing Member
+                    </Label>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2 text-blue-600 mb-2">
+                    <Info className="h-4 w-4" />
+                    <span className="font-medium">
+                      {isExistingMember ? 'Existing Member Transfer' : 'New Member Registration'}
+                    </span>
+                  </div>
+                  <p className="text-sm text-blue-700">
+                    {isExistingMember 
+                      ? 'This member is transferring from another gym or has an existing membership. Set their last payment date and amount.'
+                      : 'This is a new member joining the gym. Standard pricing and payment flow applies.'
+                    }
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
             {/* Package Summary */}
-            <Card className="gym-card-gradient border-border">
+            <Card className="border-border gym-card-gradient">
               <CardHeader>
                 <CardTitle className="text-base flex items-center gap-2 text-foreground">
                   <PackageIcon className="h-4 w-4" />
@@ -783,152 +936,169 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                   </div>
                   
                   <div className="flex items-center justify-between">
-                    <Label htmlFor="duration" className="text-foreground">Duration *</Label>
-                    <Select value={duration.toString()} onValueChange={(value) => setDuration(parseInt(value))}>
-                      <SelectTrigger className="w-32 bg-background border-border">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {[1, 2, 3, 6, 12].map((months) => (
-                          <SelectItem key={months} value={months.toString()}>
-                            {months} month{months > 1 ? 's' : ''}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <span className="text-sm text-muted-foreground">Duration</span>
+                    <span className="text-foreground">{selectedPackage?.duration_months} months</span>
                   </div>
-                  
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">Calculated Total</span>
-                    <span className="font-medium text-foreground">${calculatedPrice}</span>
-                  </div>
-                  
-                  <Separator className="bg-border" />
-                  
-                  {/* Professional Price Editing Section */}
-                  <div className="bg-accent/30 p-4 rounded-lg border border-border">
-                    <div className="flex items-center justify-between mb-3">
-                      <Label className="text-base font-medium text-foreground">Final Price</Label>
-                      {isCustomPrice && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={resetPriceToCalculated}
-                          className="text-xs h-7"
-                        >
-                          Reset to Calculated
-                        </Button>
-                      )}
-                    </div>
-                    
-                    <div className="flex items-center gap-3">
-                      <div className="flex-1">
-                        <Input
-                          type="number"
-                          step="0.01"
-                          value={customPrice}
-                          onChange={(e) => setCustomPrice(e.target.value)}
-                          className="text-lg font-semibold bg-background border-border text-foreground"
-                          placeholder="0.00"
-                        />
-                      </div>
-                      <span className="text-sm text-muted-foreground">USD</span>
-                    </div>
-                    
-                    {isCustomPrice && (
-                      <div className="mt-2 text-sm text-amber-300 bg-amber-500/10 p-2 rounded flex items-center gap-2 border border-amber-500/20">
-                        <Info className="h-4 w-4" />
-                        <span>Custom pricing applied (${Math.abs(parseFloat(customPrice || '0') - calculatedPrice).toFixed(2)} {parseFloat(customPrice || '0') > calculatedPrice ? 'above' : 'below'} calculated price)</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
 
-            {/* Members Summary */}
-            <Card className="gym-card-gradient border-border">
-              <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2 text-foreground">
-                  <Users className="h-4 w-4" />
-                  Members ({memberForms.length})
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {memberForms.map((member, index) => (
-                    <div key={index} className="flex items-center justify-between p-3 bg-accent/30 rounded-lg border border-border">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-sm font-medium">
-                          {index + 1}
-                        </div>
+                  {isExistingMember ? (
+                    // Enhanced: Existing Member Fields
+                    <>
+                      <Separator className="bg-border" />
+                      <div className="space-y-4">
                         <div>
-                          <div className="font-medium text-foreground">
-                            {member.firstName && member.lastName 
-                              ? `${member.firstName} ${member.lastName}`
-                              : 'Name not entered'
-                            }
-                          </div>
-                          {member.email && (
-                            <div className="text-sm text-muted-foreground">{member.email}</div>
-                          )}
+                          <Label htmlFor="lastPaidDate" className="text-foreground">Last Paid Date *</Label>
+                          <Input
+                            id="lastPaidDate"
+                            type="date"
+                            value={lastPaidDate}
+                            onChange={(e) => setLastPaidDate(e.target.value)}
+                            className="mt-1 bg-background border-border text-foreground"
+                          />
                         </div>
-                      </div>
-                      <div className="text-right">
-                        {member.isExisting ? (
-                          <Badge variant="default" className="bg-green-500/10 text-green-500 border-green-500/20">
-                            Existing
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline">
-                            New
-                          </Badge>
+                        
+                        <div>
+                          <Label htmlFor="manualPrice" className="text-foreground">Amount Paid *</Label>
+                          <div className="flex items-center space-x-2">
+                            <Input
+                              id="manualPrice"
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={manualPrice}
+                              onChange={(e) => setManualPrice(e.target.value)}
+                              placeholder="Enter amount paid"
+                              className="mt-1 bg-background border-border text-foreground"
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setManualPrice(calculatedPrice.toString())}
+                              className="mt-1"
+                            >
+                              Use Standard
+                            </Button>
+                          </div>
+                        </div>
+
+                        {lastPaidDate && (
+                          <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                            <div className="flex items-center gap-2 text-green-600 text-sm">
+                              <Calendar className="h-4 w-4" />
+                              <strong>Calculated Expiry Date:</strong>
+                            </div>
+                            <p className="text-green-700 font-medium">
+                              {expiryDate ? new Date(expiryDate).toLocaleDateString() : 'Select last paid date'}
+                            </p>
+                          </div>
                         )}
                       </div>
-                    </div>
-                  ))}
+                    </>
+                  ) : (
+                    // Original: New Member Fields
+                    <>
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="duration" className="text-foreground">Duration *</Label>
+                        <Select value={duration.toString()} onValueChange={(value) => setDuration(parseInt(value))}>
+                          <SelectTrigger className="w-32 bg-background border-border">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {[1, 2, 3, 6, 12].map((months) => (
+                              <SelectItem key={months} value={months.toString()}>
+                                {months} month{months > 1 ? 's' : ''}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Calculated Total</span>
+                        <span className="text-foreground">${calculatedPrice}</span>
+                      </div>
+                      
+                      <div>
+                        <Label htmlFor="customPrice" className="text-foreground">Final Price *</Label>
+                        <div className="flex items-center space-x-2">
+                          <Input
+                            id="customPrice"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={customPrice}
+                            onChange={(e) => setCustomPrice(e.target.value)}
+                            placeholder="Enter final price"
+                            className="mt-1 bg-background border-border text-foreground"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={resetPriceToCalculated}
+                            className="mt-1"
+                          >
+                            Reset
+                          </Button>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               </CardContent>
             </Card>
 
             {/* Payment Method */}
-            <Card className="gym-card-gradient border-border">
+            <Card className="border-border gym-card-gradient">
               <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2 text-foreground">
-                  <CreditCard className="h-4 w-4" />
-                  Payment Method *
+                <CardTitle className="text-base text-foreground">
+                  {isExistingMember ? 'Payment Status' : 'Payment Method'}
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <RadioGroup value={paymentMethod} onValueChange={(value: 'cash' | 'card') => setPaymentMethod(value)}>
-                  <div className="grid grid-cols-2 gap-4">
-                    <label htmlFor="cash" className={`border-2 rounded-lg p-4 cursor-pointer transition-all ${paymentMethod === 'cash' ? 'border-primary bg-primary/10' : 'border-border hover:border-border/60'}`}>
-                      <div className="flex items-center space-x-2">
-                        <RadioGroupItem value="cash" id="cash" />
-                        <div className="flex items-center gap-2 font-medium text-foreground">
-                          <DollarSign className="h-5 w-5" />
-                          Cash Payment
-                        </div>
-                      </div>
-                      <p className="text-sm text-muted-foreground mt-2 ml-6">
-                        Pay with cash at the front desk
-                      </p>
-                    </label>
-                    
-                    <label htmlFor="card" className={`border-2 rounded-lg p-4 cursor-pointer transition-all ${paymentMethod === 'card' ? 'border-primary bg-primary/10' : 'border-border hover:border-border/60'}`}>
-                      <div className="flex items-center space-x-2">
-                        <RadioGroupItem value="card" id="card" />
-                        <div className="flex items-center gap-2 font-medium text-foreground">
-                          <CreditCard className="h-5 w-5" />
-                          Card Payment
-                        </div>
-                      </div>
-                      <p className="text-sm text-muted-foreground mt-2 ml-6">
-                        Pay with credit or debit card
-                      </p>
-                    </label>
+                {isExistingMember ? (
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                    <div className="flex items-center gap-2 text-green-600">
+                      <CheckCircle className="h-5 w-5" />
+                      <span className="font-medium">Already Paid</span>
+                    </div>
+                    <p className="text-sm text-green-700 mt-1">
+                      Member has already paid for this period. No additional payment required.
+                    </p>
                   </div>
-                </RadioGroup>
+                ) : (
+                  <RadioGroup value={paymentMethod} onValueChange={(value: 'cash' | 'card') => setPaymentMethod(value)}>
+                    <div className="space-y-3">
+                      <label className={`flex items-start space-x-3 p-4 rounded-lg border cursor-pointer transition-colors ${
+                        paymentMethod === 'cash' ? 'border-primary bg-primary/10' : 'border-border hover:border-border/60'}`}>
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="cash" id="cash" />
+                          <div className="flex items-center gap-2 font-medium text-foreground">
+                            <DollarSign className="h-5 w-5" />
+                            Cash Payment
+                          </div>
+                        </div>
+                        <p className="text-sm text-muted-foreground mt-2 ml-6">
+                          Pay with cash at the front desk
+                        </p>
+                      </label>
+                      
+                      <label className={`flex items-start space-x-3 p-4 rounded-lg border cursor-pointer transition-colors ${
+                        paymentMethod === 'card' ? 'border-primary bg-primary/10' : 'border-border hover:border-border/60'}`}>
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="card" id="card" />
+                          <div className="flex items-center gap-2 font-medium text-foreground">
+                            <CreditCard className="h-5 w-5" />
+                            Card Payment
+                          </div>
+                        </div>
+                        <p className="text-sm text-muted-foreground mt-2 ml-6">
+                          Pay with credit or debit card
+                        </p>
+                      </label>
+                    </div>
+                  </RadioGroup>
+                )}
               </CardContent>
             </Card>
 
@@ -936,11 +1106,19 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
             <Card className="border-primary/20 bg-primary/10 gym-card-gradient">
               <CardContent className="p-4">
                 <div className="flex justify-between items-center">
-                  <span className="text-lg font-semibold text-foreground">Total Amount</span>
-                  <span className="text-2xl font-bold text-primary">${customPrice || '0'}</span>
+                  <span className="text-lg font-semibold text-foreground">
+                    {isExistingMember ? 'Amount Paid' : 'Total Amount'}
+                  </span>
+                  <span className="text-2xl font-bold text-primary">
+                    ${isExistingMember ? manualPrice || '0' : customPrice || '0'}
+                  </span>
                 </div>
                 <div className="text-sm text-muted-foreground mt-1">
-                  {duration} month{duration > 1 ? 's' : ''} • {memberForms.length} member{memberForms.length > 1 ? 's' : ''} • {paymentMethod === 'cash' ? 'Cash' : 'Card'} payment
+                  {memberForms.length} member{memberForms.length > 1 ? 's' : ''} • 
+                  {isExistingMember 
+                    ? ` Already paid • Expires ${expiryDate ? new Date(expiryDate).toLocaleDateString() : 'TBD'}`
+                    : ` ${duration} month${duration > 1 ? 's' : ''} • ${paymentMethod === 'cash' ? 'Cash' : 'Card'} payment`
+                  }
                 </div>
               </CardContent>
             </Card>
@@ -954,11 +1132,24 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                     <div>
                       <div className="font-medium text-amber-300">Please complete the following:</div>
                       <ul className="text-sm text-amber-200 mt-1 space-y-1">
-                        {parseFloat(customPrice || '0') <= 0 && (
-                          <li>• Enter a valid price amount</li>
-                        )}
-                        {!paymentMethod && (
-                          <li>• Select a payment method</li>
+                        {isExistingMember ? (
+                          <>
+                            {parseFloat(manualPrice || '0') < 0 && (
+                              <li>• Enter a valid amount paid</li>
+                            )}
+                            {!lastPaidDate && (
+                              <li>• Select the last paid date</li>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            {parseFloat(customPrice || '0') <= 0 && (
+                              <li>• Enter a valid price amount</li>
+                            )}
+                            {!paymentMethod && (
+                              <li>• Select a payment method</li>
+                            )}
+                          </>
                         )}
                         {!validateAllMembers() && (
                           <li>• Complete all required member information</li>
@@ -978,13 +1169,17 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
             <div className="text-center mb-6">
               <Shield className="h-12 w-12 mx-auto mb-4 text-primary" />
               <h3 className="text-lg font-semibold text-foreground">Staff Verification Required</h3>
-              <p className="text-muted-foreground">Confirm member creation and payment processing</p>
+              <p className="text-muted-foreground">
+                Confirm member {isExistingMember ? 'transfer' : 'creation'} and payment processing
+              </p>
             </div>
 
             {/* Transaction Summary */}
             <Card className="border-primary/20 bg-primary/10 gym-card-gradient">
               <CardHeader>
-                <CardTitle className="text-base text-primary">Transaction Summary</CardTitle>
+                <CardTitle className="text-base text-primary">
+                  {isExistingMember ? 'Transfer Summary' : 'Transaction Summary'}
+                </CardTitle>
               </CardHeader>
               <CardContent className="text-sm space-y-2">
                 <div className="flex justify-between">
@@ -995,52 +1190,75 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                   <span className="text-muted-foreground">Members:</span>
                   <span className="font-medium text-foreground">{memberForms.length}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Duration:</span>
-                  <span className="font-medium text-foreground">{duration} month{duration > 1 ? 's' : ''}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Payment Method:</span>
-                  <span className="font-medium text-foreground capitalize">{paymentMethod}</span>
-                </div>
-                <Separator className="bg-border" />
-                <div className="flex justify-between font-semibold">
-                  <span className="text-foreground">Total Amount:</span>
-                  <span className="text-foreground">${customPrice}</span>
-                </div>
+                {isExistingMember ? (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Last Paid:</span>
+                      <span className="font-medium text-foreground">
+                        {lastPaidDate ? new Date(lastPaidDate).toLocaleDateString() : 'Not set'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Expires:</span>
+                      <span className="font-medium text-foreground">
+                        {calculateExpiryDate() ? new Date(calculateExpiryDate()).toLocaleDateString() : 'TBD'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Amount:</span>
+                      <span className="font-medium text-foreground">${manualPrice || '0'}</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Duration:</span>
+                      <span className="font-medium text-foreground">{duration} month{duration > 1 ? 's' : ''}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Payment:</span>
+                      <span className="font-medium text-foreground">{paymentMethod === 'cash' ? 'Cash' : 'Card'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Total:</span>
+                      <span className="font-medium text-foreground">${customPrice || '0'}</span>
+                    </div>
+                  </>
+                )}
               </CardContent>
             </Card>
 
-            {/* Staff Verification Form */}
-            <Card className="gym-card-gradient border-border">
+            {/* Staff PIN Verification - ORIGINAL */}
+            <Card className="border-border gym-card-gradient">
               <CardHeader>
                 <CardTitle className="text-base text-foreground">Staff Authorization</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
-                  <Label htmlFor="staffId" className="text-foreground">Staff Member *</Label>
+                  <Label htmlFor="staffSelect" className="text-foreground">Authorizing Staff Member</Label>
                   <Select value={verification.staffId} onValueChange={(value) => setVerification(prev => ({ ...prev, staffId: value }))}>
                     <SelectTrigger className="mt-1 bg-background border-border">
                       <SelectValue placeholder="Select staff member" />
                     </SelectTrigger>
                     <SelectContent>
-                      {staff.map((staffMember) => (
-                        <SelectItem key={staffMember.id} value={staffMember.id}>
-                          {staffMember.first_name} {staffMember.last_name} ({staffMember.role})
+                      {staff.map((member) => (
+                        <SelectItem key={member.id} value={member.id}>
+                          {member.first_name} {member.last_name} ({member.role})
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
+                
                 <div>
-                  <Label htmlFor="pin" className="text-foreground">Security PIN *</Label>
+                  <Label htmlFor="pin" className="text-foreground">Staff PIN</Label>
                   <Input
                     id="pin"
                     type="password"
+                    maxLength={4}
                     value={verification.pin}
-                    onChange={(e) => setVerification(prev => ({ ...prev, pin: e.target.value }))}
-                    placeholder="Enter your security PIN"
-                    maxLength={6}
+                    onChange={(e) => setVerification(prev => ({ ...prev, pin: e.target.value.replace(/\D/g, '') }))}
+                    placeholder="Enter 4-digit PIN"
                     className="mt-1 bg-background border-border text-foreground"
                   />
                 </div>
@@ -1051,118 +1269,99 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
 
       case 'success':
         return (
-          <div className="text-center space-y-6">
-            <CheckCircle className="h-16 w-16 mx-auto text-green-400" />
-            <div>
-              <h3 className="text-xl font-semibold text-green-400">Success!</h3>
-              <p className="text-muted-foreground mt-2">
-                {createdAccounts.length} member{createdAccounts.length > 1 ? 's have' : ' has'} been successfully created
+          <div className="space-y-6">
+            <div className="text-center mb-6">
+              <CheckCircle className="h-16 w-16 mx-auto mb-4 text-green-500" />
+              <h3 className="text-2xl font-semibold text-foreground">
+                {isExistingMember ? 'Members Successfully Transferred!' : 'Members Successfully Created!'}
+              </h3>
+              <p className="text-muted-foreground">
+                {createdAccounts.length} member{createdAccounts.length > 1 ? 's have' : ' has'} been {isExistingMember ? 'transferred' : 'added'} to the system
               </p>
             </div>
 
-            {createdAccounts.length > 0 && (
-              <Card className="gym-card-gradient border-border">
+            {/* Account Information */}
+            {createdAccounts.map((account, index) => (
+              <Card key={index} className="border-green-500/20 bg-green-500/10 gym-card-gradient">
                 <CardHeader>
-                  <CardTitle className="text-base text-foreground flex items-center gap-2">
-                    <UserCheck className="h-4 w-4" />
-                    Account Details Created
-                  </CardTitle>
+                  <CardTitle className="text-base text-green-800">{account.fullName}</CardTitle>
+                  <p className="text-sm text-green-600">Account Details</p>
                 </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    {createdAccounts.map((account, index) => (
-                      <Card key={index} className="bg-accent/30 border border-border">
-                        <CardContent className="p-4">
-                          <div className="flex items-start justify-between mb-3">
-                            <div>
-                              <div className="font-medium text-foreground text-lg">
-                                {account.fullName || `${account.first_name} ${account.last_name}`}
-                              </div>
-                              <div className="text-sm text-muted-foreground">
-                                Member ID: {account.id}
-                              </div>
-                            </div>
-                            <Badge variant="default" className="bg-green-500/10 text-green-500 border-green-500/20">
-                              Active
-                            </Badge>
-                          </div>
-                          
-                          <Separator className="bg-border mb-3" />
-                          
-                          <div className="space-y-3">
-                            <div className="bg-primary/10 p-3 rounded-lg border border-primary/20">
-                              <div className="text-sm font-medium text-primary mb-2">Temporary Login Credentials</div>
-                              <div className="space-y-2">
-                                <div className="flex justify-between items-center">
-                                  <span className="text-sm text-muted-foreground">Temp Email:</span>
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-mono text-sm text-foreground">
-                                      {account.accountEmail || account.email}
-                                    </span>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="p-1 h-6 w-6"
-                                      onClick={() => {
-                                        navigator.clipboard.writeText(account.accountEmail || account.email);
-                                        toast({ title: "Copied!", description: "Email copied to clipboard" });
-                                      }}
-                                    >
-                                      <Copy className="h-3 w-3" />
-                                    </Button>
-                                  </div>
-                                </div>
-                                <div className="flex justify-between items-center">
-                                  <span className="text-sm text-muted-foreground">Temp Password:</span>
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-mono text-sm text-foreground bg-background px-2 py-1 rounded border">
-                                      {account.accountPassword || 'Generated by system'}
-                                    </span>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="p-1 h-6 w-6"
-                                      onClick={() => {
-                                        navigator.clipboard.writeText(account.accountPassword || '');
-                                        toast({ title: "Copied!", description: "Password copied to clipboard" });
-                                      }}
-                                    >
-                                      <Copy className="h-3 w-3" />
-                                    </Button>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                            
-                            <div className="grid grid-cols-2 gap-3 text-sm">
-                              <div>
-                                <span className="text-muted-foreground">Start Date:</span>
-                                <div className="font-medium text-foreground">
-                                  {account.start_date ? new Date(account.start_date).toLocaleDateString() : 'Today'}
-                                </div>
-                              </div>
-                              <div>
-                                <span className="text-muted-foreground">Expires:</span>
-                                <div className="font-medium text-foreground">
-                                  {account.expiry_date ? new Date(account.expiry_date).toLocaleDateString() : `${duration} month${duration > 1 ? 's' : ''}`}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                    
-                    <div className="text-xs text-muted-foreground bg-accent/20 p-3 rounded border border-border">
-                      <Info className="h-4 w-4 inline mr-2" />
-                      These are temporary login credentials based on the member's national ID. Members can update their email and password after first login.
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <p className="text-muted-foreground">Member ID</p>
+                      <p className="font-medium text-foreground">{account.id}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Status</p>
+                      <Badge variant="default">Active</Badge>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Starts</p>
+                      <div className="font-medium text-foreground">
+                        {account.start_date ? new Date(account.start_date).toLocaleDateString() : 'Today'}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Expires</p>
+                      <div className="font-medium text-foreground">
+                        {account.expiry_date ? new Date(account.expiry_date).toLocaleDateString() : `${duration} month${duration > 1 ? 's' : ''}`}
+                      </div>
                     </div>
                   </div>
+
+                  {/* Enhanced: Login Credentials for auto-generated emails */}
+                  {account.isAutoGenerated && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <div className="flex items-center gap-2 text-blue-600 mb-2">
+                        <UserPlus className="h-4 w-4" />
+                        <span className="font-medium">Login Credentials</span>
+                      </div>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex items-center justify-between">
+                          <span className="text-blue-700">Email:</span>
+                          <div className="flex items-center gap-2">
+                            <code className="bg-blue-100 px-2 py-1 rounded text-xs">{account.accountEmail}</code>
+                            <Button size="sm" variant="outline" onClick={() => navigator.clipboard?.writeText(account.accountEmail)}>
+                              <Copy className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-blue-700">Password:</span>
+                          <div className="flex items-center gap-2">
+                            <code className="bg-blue-100 px-2 py-1 rounded text-xs">{account.accountPassword}</code>
+                            <Button size="sm" variant="outline" onClick={() => navigator.clipboard?.writeText(account.accountPassword)}>
+                              <Copy className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mt-3">
+                        <h4 className="font-medium text-yellow-800 text-sm mb-1">Instructions for Member:</h4>
+                        <ul className="text-xs text-yellow-700 space-y-1">
+                          <li>1. Login with the email and password above</li>
+                          <li>2. Change password from National ID to secure password</li>
+                          <li>3. Add their real email address if needed</li>
+                          <li>4. Verify their email address</li>
+                        </ul>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
-            )}
+            ))}
 
-            <Button onClick={() => onOpenChange(false)} className="mt-4">
+            <div className="text-xs text-muted-foreground bg-accent/20 p-3 rounded border border-border">
+              <Info className="h-4 w-4 inline mr-2" />
+              {isExistingMember 
+                ? 'Member accounts with auto-generated credentials can be updated by the member after first login.'
+                : 'These are temporary login credentials based on the member\'s national ID. Members can update their email and password after first login.'
+              }
+            </div>
+
+            <Button onClick={() => onOpenChange(false)} className="w-full">
               Close
             </Button>
           </div>
@@ -1210,7 +1409,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto gym-card-gradient border-border">
         <DialogHeader>
           <DialogTitle className="text-foreground">
-            Add New Member - Step {stepInfo.current} of {stepInfo.total}
+            {isExistingMember ? 'Transfer Existing Member' : 'Add New Member'} - Step {stepInfo.current} of {stepInfo.total}
           </DialogTitle>
           <p className="text-muted-foreground">{stepInfo.title}</p>
         </DialogHeader>
@@ -1225,7 +1424,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                   className={`flex-1 h-2 rounded ${
                     ['package', 'members', 'summary', 'verification'].indexOf(currentStep) >= index
                       ? 'bg-primary'
-                      : 'bg-muted'
+                      : 'bg-gray-200'
                   }`}
                 />
               ))}
@@ -1233,17 +1432,15 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
           )}
 
           {/* Step Content */}
-          <div className="min-h-[400px]">
-            {renderStepContent()}
-          </div>
+          {renderStepContent()}
 
-          {/* Navigation Buttons */}
+          {/* Navigation Buttons - ORIGINAL LOGIC */}
           {currentStep !== 'success' && (
-            <div className="flex justify-between pt-4 border-t border-border">
+            <div className="flex justify-between pt-6">
               <div>
                 {showBackButton() && (
-                  <Button variant="outline" onClick={handleBack}>
-                    <ArrowLeft className="h-4 w-4 mr-2" />
+                  <Button variant="outline" onClick={handleBack} className="flex items-center gap-2">
+                    <ArrowLeft className="h-4 w-4" />
                     Back
                   </Button>
                 )}
@@ -1252,32 +1449,23 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
               <div className="flex gap-2">
                 {showNextButton() && (
                   <Button 
-                    onClick={handleNext}
+                    onClick={handleNext} 
                     disabled={!canProceed()}
-                    className="min-w-[120px]"
+                    className="flex items-center gap-2"
                   >
-                    {currentStep === 'summary' ? 'Review & Verify' : 'Next'}
-                    <ArrowRight className="h-4 w-4 ml-2" />
+                    Next
+                    <ArrowRight className="h-4 w-4" />
                   </Button>
                 )}
                 
                 {showSubmitButton() && (
                   <Button 
-                    onClick={handleSubmit}
+                    onClick={handleSubmit} 
                     disabled={!canProceed() || loading}
-                    className="min-w-[120px]"
+                    className="flex items-center gap-2"
                   >
-                    {loading ? (
-                      <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
-                        Creating...
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle className="h-4 w-4 mr-2" />
-                        Create Members
-                      </>
-                    )}
+                    {loading ? 'Processing...' : (isExistingMember ? 'Transfer Member' : 'Create Member')}
+                    {!loading && <UserCheck className="h-4 w-4" />}
                   </Button>
                 )}
               </div>

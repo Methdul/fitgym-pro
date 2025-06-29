@@ -47,11 +47,14 @@ export const AddExistingMemberModal = ({
     setLoading(true);
     try {
       const memberData = {
-        branch_id: branchId,
-        first_name: formData.firstName,
-        last_name: formData.lastName,
+  // ✅ Fix field names to match backend validation (camelCase)
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        email: `${formData.nationalId}@gmail.com`, // ✅ Auto-generate email
         phone: formData.phone,
-        national_id: formData.nationalId,
+        branchId: branchId,                       // ✅ camelCase
+        packageId: "default-existing-package-id", // ✅ Add default package
+        nationalId: formData.nationalId,          // ✅ Backend might need this
         status: 'active' as const,
         package_type: 'individual' as const,
         package_name: 'Existing Member Transfer',
