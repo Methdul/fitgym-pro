@@ -114,7 +114,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
       setMemberForms(forms);
       setCurrentMemberIndex(0);
     }
-  }, [selectedPackage]);
+  }, [open, selectedPackage?.id, selectedPackage?.max_members, memberForms.length]);
 
   // Initialize form - ORIGINAL LOGIC
   useEffect(() => {
@@ -543,7 +543,11 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
                       ? 'ring-2 ring-primary border-primary'
                       : 'border-border hover:border-primary/50'
                   }`}
-                  onClick={() => setSelectedPackage(pkg)}
+                  onClick={() => {
+                              console.log('📦 Package selected:', pkg.name, 'max_members:', pkg.max_members);
+                              setSelectedPackage(pkg);
+                              setMemberForms([]); // Clear forms to force refresh
+                            }}
                 >
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center justify-between text-foreground">
