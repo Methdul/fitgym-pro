@@ -1683,6 +1683,7 @@ const StaffDashboard = () => {
           open={showAddNew} 
           onOpenChange={setShowAddNew}
           branchId={branchId!}
+          authenticatedStaff={authenticatedStaff}
           onMemberAdded={() => {
             if (branchId) {
               db.members.getByBranch(branchId).then(({ data }) => {

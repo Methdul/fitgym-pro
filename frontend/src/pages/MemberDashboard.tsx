@@ -3,10 +3,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { User, CreditCard, Calendar, Settings, AlertTriangle, Shield, Activity, TrendingUp, Clock, Star, ChevronRight, RefreshCw, LogOut } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { User, CreditCard, Calendar, Settings, AlertTriangle, Shield, Activity, TrendingUp, Clock, Star, ChevronRight, RefreshCw, LogOut, Mail, Lock, CheckCircle, XCircle, Eye, EyeOff, Send } from 'lucide-react';
 import MemberProfile from '@/components/member/MemberProfile';
 import MemberMembership from '@/components/member/MemberMembership';
-import MemberSettings from '@/components/member/MemberSettings';
 import { VerificationBanner } from '@/components/VerificationBanner';
 import { useToast } from '@/hooks/use-toast';
 import { db, auth, supabase } from '@/lib/supabase';
@@ -24,6 +25,28 @@ const MemberDashboard = () => {
     price: 0,
     memberSince: 0
   });
+
+  // Account Settings State
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [emailForm, setEmailForm] = useState({
+    newEmail: '',
+    confirmEmail: '',
+    isChanging: false
+  });
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: '',
+    isChanging: false,
+    showCurrent: false,
+    showNew: false,
+    showConfirm: false
+  });
+  const [verificationForm, setVerificationForm] = useState({
+    isSending: false,
+    lastSent: null as Date | null
+  });
+
   const { toast } = useToast();
 
   useEffect(() => {
@@ -309,6 +332,195 @@ const MemberDashboard = () => {
     
     // Re-initialize everything
     await initializeDashboard();
+  };
+
+  // Account Settings Functions
+  const handleEmailChange = async () => {
+    if (!emailForm.newEmail || emailForm.newEmail !== emailForm.confirmEmail) {
+      toast({
+        title: "Validation Error",
+        description: "Please enter matching email addresses",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (emailForm.newEmail === currentUser?.email) {
+      toast({
+        title: "No Change",
+        description: "The new email is the same as your current email",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setEmailForm(prev => ({ ...prev, isChanging: true }));
+
+    try {
+      console.log('📧 Updating email from', currentUser?.email, 'to', emailForm.newEmail);
+      
+      // Update email in Supabase Auth
+      const { data, error } = await supabase.auth.updateUser({
+        email: emailForm.newEmail
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      // Update email in member record if exists
+      if (member) {
+        try {
+          await supabase
+            .from('members')
+            .update({ email: emailForm.newEmail })
+            .eq('id', member.id);
+          
+          // Update local member state
+          setMember(prev => prev ? { ...prev, email: emailForm.newEmail } : null);
+        } catch (memberError) {
+          console.warn('⚠️ Could not update member email:', memberError);
+        }
+      }
+
+      toast({
+        title: "Email Update Initiated",
+        description: "Please check your new email address for a confirmation link to complete the change.",
+      });
+
+      // Clear form
+      setEmailForm({
+        newEmail: '',
+        confirmEmail: '',
+        isChanging: false
+      });
+
+    } catch (error) {
+      console.error('❌ Email change error:', error);
+      toast({
+        title: "Email Change Failed",
+        description: error instanceof Error ? error.message : "Failed to update email",
+        variant: "destructive",
+      });
+    } finally {
+      setEmailForm(prev => ({ ...prev, isChanging: false }));
+    }
+  };
+
+  const handlePasswordChange = async () => {
+    if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
+      toast({
+        title: "Validation Error",
+        description: "Please fill in all password fields",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      toast({
+        title: "Validation Error",
+        description: "New passwords don't match",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (passwordForm.newPassword.length < 6) {
+      toast({
+        title: "Validation Error",
+        description: "Password must be at least 6 characters long",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setPasswordForm(prev => ({ ...prev, isChanging: true }));
+
+    try {
+      console.log('🔒 Updating password...');
+
+      // Update password in Supabase Auth
+      const { error } = await supabase.auth.updateUser({
+        password: passwordForm.newPassword
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      toast({
+        title: "Password Updated",
+        description: "Your password has been successfully changed.",
+      });
+
+      // Clear form
+      setPasswordForm({
+        currentPassword: '',
+        newPassword: '',
+        confirmPassword: '',
+        isChanging: false,
+        showCurrent: false,
+        showNew: false,
+        showConfirm: false
+      });
+
+    } catch (error) {
+      console.error('❌ Password change error:', error);
+      toast({
+        title: "Password Change Failed",
+        description: error instanceof Error ? error.message : "Failed to update password",
+        variant: "destructive",
+      });
+    } finally {
+      setPasswordForm(prev => ({ ...prev, isChanging: false }));
+    }
+  };
+
+  const handleSendVerification = async () => {
+    setVerificationForm(prev => ({ ...prev, isSending: true }));
+
+    try {
+      console.log('📨 Sending verification email...');
+
+      // Send verification email
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: currentUser?.email || ''
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      toast({
+        title: "Verification Email Sent",
+        description: `A verification email has been sent to ${currentUser?.email}`,
+      });
+
+      setVerificationForm({
+        isSending: false,
+        lastSent: new Date()
+      });
+
+    } catch (error) {
+      console.error('❌ Verification email error:', error);
+      toast({
+        title: "Failed to Send Verification",
+        description: error instanceof Error ? error.message : "Failed to send verification email",
+        variant: "destructive",
+      });
+      setVerificationForm(prev => ({ ...prev, isSending: false }));
+    }
+  };
+
+  const getVerificationCooldown = () => {
+    if (!verificationForm.lastSent) return 0;
+    const now = new Date().getTime();
+    const lastSent = verificationForm.lastSent.getTime();
+    const cooldown = 60 * 1000; // 60 seconds
+    const remaining = Math.max(0, cooldown - (now - lastSent));
+    return Math.ceil(remaining / 1000);
   };
 
   const handleMemberUpdate = (updatedMember: Member) => {
@@ -693,23 +905,20 @@ const MemberDashboard = () => {
                       </div>
                     </button>
                     
-                    <button 
-                      onClick={() => setActiveTab('settings')} 
-                      className="w-full p-4 text-left border rounded-xl hover:bg-primary/5 hover:border-primary/50 transition-all duration-300 group/item"
-                    >
+                    <div className="w-full p-4 border rounded-xl bg-muted/30 group/item">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-gradient-to-br from-purple-500/20 to-purple-600/20 rounded-lg flex items-center justify-center group-hover/item:scale-110 transition-transform duration-300">
-                            <Settings className="h-5 w-5 text-purple-600" />
+                          <div className="w-10 h-10 bg-gradient-to-br from-gray-500/20 to-gray-600/20 rounded-lg flex items-center justify-center">
+                            <Settings className="h-5 w-5 text-gray-600" />
                           </div>
                           <div>
-                            <p className="font-medium group-hover/item:text-primary transition-colors duration-300">Account Settings</p>
+                            <p className="font-medium text-gray-600">Account Settings</p>
                             <p className="text-sm text-muted-foreground">Password, email & security settings</p>
                           </div>
                         </div>
-                        <ChevronRight className="h-5 w-5 text-muted-foreground group-hover/item:text-primary group-hover/item:translate-x-1 transition-all duration-300" />
+                        <Badge variant="secondary" className="text-xs">Coming Soon</Badge>
                       </div>
-                    </button>
+                    </div>
                   </CardContent>
                 </Card>
 
@@ -808,16 +1017,302 @@ const MemberDashboard = () => {
               </Card>
             </TabsContent>
 
+            <TabsContent value="settings" className="space-y-8">
+              {/* Account Security */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Email Management */}
+                <Card className="gym-card-gradient border-border hover:border-primary transition-all duration-500 group relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-20 h-20 bg-gradient-to-br from-blue-500/20 to-transparent rounded-bl-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                  <CardHeader className="relative z-10">
+                    <CardTitle className="flex items-center gap-3 group-hover:text-primary transition-colors duration-300">
+                      <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center">
+                        <Mail className="h-5 w-5 text-white" />
+                      </div>
+                      Email Settings
+                    </CardTitle>
+                    <CardDescription className="group-hover:text-foreground transition-colors duration-300">
+                      Manage your email address and verification
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-6 relative z-10">
+                    {/* Current Email */}
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">Current Email</Label>
+                      <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
+                        <Mail className="h-4 w-4 text-muted-foreground" />
+                        <span className="font-medium">{currentUser?.email || 'Loading...'}</span>
+                        <Badge variant={currentUser?.email_confirmed_at ? "default" : "secondary"} className="ml-auto">
+                          {currentUser?.email_confirmed_at ? (
+                            <><CheckCircle className="h-3 w-3 mr-1" />Verified</>
+                          ) : (
+                            <><XCircle className="h-3 w-3 mr-1" />Unverified</>
+                          )}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    {/* Verification Section */}
+                    {!currentUser?.email_confirmed_at && (
+                      <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+                        <div className="flex items-start gap-3">
+                          <AlertTriangle className="h-5 w-5 text-yellow-600 mt-0.5" />
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+                              Email Verification Required
+                            </p>
+                            <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-1">
+                              Please verify your email address to secure your account and receive important updates.
+                            </p>
+                            <Button 
+                              size="sm" 
+                              className="mt-3"
+                              onClick={handleSendVerification}
+                              disabled={verificationForm.isSending || getVerificationCooldown() > 0}
+                            >
+                              {verificationForm.isSending ? (
+                                <>
+                                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                                  Sending...
+                                </>
+                              ) : getVerificationCooldown() > 0 ? (
+                                `Resend in ${getVerificationCooldown()}s`
+                              ) : (
+                                <>
+                                  <Send className="h-4 w-4 mr-2" />
+                                  {verificationForm.lastSent ? 'Resend Verification' : 'Send Verification'}
+                                </>
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Change Email Form */}
+                    <div className="space-y-4 border-t pt-4">
+                      <Label className="text-sm font-medium">Change Email Address</Label>
+                      
+                      <div className="space-y-3">
+                        <div>
+                          <Label htmlFor="newEmail" className="text-sm">New Email</Label>
+                          <Input
+                            id="newEmail"
+                            type="email"
+                            value={emailForm.newEmail}
+                            onChange={(e) => setEmailForm(prev => ({ ...prev, newEmail: e.target.value }))}
+                            placeholder="Enter new email address"
+                            disabled={emailForm.isChanging}
+                          />
+                        </div>
+                        
+                        <div>
+                          <Label htmlFor="confirmEmail" className="text-sm">Confirm New Email</Label>
+                          <Input
+                            id="confirmEmail"
+                            type="email"
+                            value={emailForm.confirmEmail}
+                            onChange={(e) => setEmailForm(prev => ({ ...prev, confirmEmail: e.target.value }))}
+                            placeholder="Confirm new email address"
+                            disabled={emailForm.isChanging}
+                          />
+                        </div>
+                        
+                        <Button 
+                          onClick={handleEmailChange}
+                          disabled={emailForm.isChanging || !emailForm.newEmail || emailForm.newEmail !== emailForm.confirmEmail}
+                          className="w-full"
+                        >
+                          {emailForm.isChanging ? (
+                            <>
+                              <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                              Updating Email...
+                            </>
+                          ) : (
+                            <>
+                              <Mail className="h-4 w-4 mr-2" />
+                              Update Email
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Password Management */}
+                <Card className="gym-card-gradient border-border hover:border-primary transition-all duration-500 group relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-20 h-20 bg-gradient-to-br from-red-500/20 to-transparent rounded-bl-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                  <CardHeader className="relative z-10">
+                    <CardTitle className="flex items-center gap-3 group-hover:text-primary transition-colors duration-300">
+                      <div className="w-10 h-10 bg-gradient-to-br from-red-500 to-pink-600 rounded-full flex items-center justify-center">
+                        <Lock className="h-5 w-5 text-white" />
+                      </div>
+                      Password Security
+                    </CardTitle>
+                    <CardDescription className="group-hover:text-foreground transition-colors duration-300">
+                      Update your account password
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-6 relative z-10">
+                    {/* Password Change Form */}
+                    <div className="space-y-4">
+                      <div>
+                        <Label htmlFor="currentPassword" className="text-sm">Current Password</Label>
+                        <div className="relative">
+                          <Input
+                            id="currentPassword"
+                            type={passwordForm.showCurrent ? "text" : "password"}
+                            value={passwordForm.currentPassword}
+                            onChange={(e) => setPasswordForm(prev => ({ ...prev, currentPassword: e.target.value }))}
+                            placeholder="Enter current password"
+                            disabled={passwordForm.isChanging}
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="absolute right-0 top-0 h-full px-3"
+                            onClick={() => setPasswordForm(prev => ({ ...prev, showCurrent: !prev.showCurrent }))}
+                            disabled={passwordForm.isChanging}
+                          >
+                            {passwordForm.showCurrent ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </Button>
+                        </div>
+                      </div>
+                      
+                      <div>
+                        <Label htmlFor="newPassword" className="text-sm">New Password</Label>
+                        <div className="relative">
+                          <Input
+                            id="newPassword"
+                            type={passwordForm.showNew ? "text" : "password"}
+                            value={passwordForm.newPassword}
+                            onChange={(e) => setPasswordForm(prev => ({ ...prev, newPassword: e.target.value }))}
+                            placeholder="Enter new password (min. 6 characters)"
+                            disabled={passwordForm.isChanging}
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="absolute right-0 top-0 h-full px-3"
+                            onClick={() => setPasswordForm(prev => ({ ...prev, showNew: !prev.showNew }))}
+                            disabled={passwordForm.isChanging}
+                          >
+                            {passwordForm.showNew ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </Button>
+                        </div>
+                      </div>
+                      
+                      <div>
+                        <Label htmlFor="confirmPassword" className="text-sm">Confirm New Password</Label>
+                        <div className="relative">
+                          <Input
+                            id="confirmPassword"
+                            type={passwordForm.showConfirm ? "text" : "password"}
+                            value={passwordForm.confirmPassword}
+                            onChange={(e) => setPasswordForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                            placeholder="Confirm new password"
+                            disabled={passwordForm.isChanging}
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="absolute right-0 top-0 h-full px-3"
+                            onClick={() => setPasswordForm(prev => ({ ...prev, showConfirm: !prev.showConfirm }))}
+                            disabled={passwordForm.isChanging}
+                          >
+                            {passwordForm.showConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </Button>
+                        </div>
+                      </div>
+                      
+                      {/* Password Requirements */}
+                      <div className="text-xs text-muted-foreground space-y-1">
+                        <p>Password requirements:</p>
+                        <ul className="list-disc list-inside space-y-0.5 ml-2">
+                          <li className={passwordForm.newPassword.length >= 6 ? 'text-green-600' : ''}>
+                            At least 6 characters
+                          </li>
+                          <li className={passwordForm.newPassword && passwordForm.newPassword === passwordForm.confirmPassword ? 'text-green-600' : ''}>
+                            Passwords match
+                          </li>
+                        </ul>
+                      </div>
+                      
+                      <Button 
+                        onClick={handlePasswordChange}
+                        disabled={
+                          passwordForm.isChanging || 
+                          !passwordForm.currentPassword || 
+                          !passwordForm.newPassword || 
+                          passwordForm.newPassword !== passwordForm.confirmPassword ||
+                          passwordForm.newPassword.length < 6
+                        }
+                        className="w-full"
+                      >
+                        {passwordForm.isChanging ? (
+                          <>
+                            <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                            Updating Password...
+                          </>
+                        ) : (
+                          <>
+                            <Lock className="h-4 w-4 mr-2" />
+                            Update Password
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Account Security Info */}
+              <Card className="gym-card-gradient border-border">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-emerald-600 rounded-full flex items-center justify-center">
+                      <Shield className="h-5 w-5 text-white" />
+                    </div>
+                    Account Security
+                  </CardTitle>
+                  <CardDescription>
+                    Tips to keep your account secure
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-3">
+                      <h4 className="font-semibold text-green-600">✅ Security Best Practices</h4>
+                      <ul className="text-sm space-y-2 text-muted-foreground">
+                        <li>• Use a strong, unique password</li>
+                        <li>• Keep your email address verified</li>
+                        <li>• Don't share your login credentials</li>
+                        <li>• Sign out from shared devices</li>
+                      </ul>
+                    </div>
+                    <div className="space-y-3">
+                      <h4 className="font-semibold text-blue-600">📧 Email Notifications</h4>
+                      <ul className="text-sm space-y-2 text-muted-foreground">
+                        <li>• Membership expiry reminders</li>
+                        <li>• Password change confirmations</li>
+                        <li>• Account security alerts</li>
+                        <li>• Promotional offers (optional)</li>
+                      </ul>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
             <TabsContent value="profile">
               <MemberProfile member={member} />
             </TabsContent>
 
             <TabsContent value="membership">
               <MemberMembership member={member} onMemberUpdate={handleMemberUpdate} />
-            </TabsContent>
-
-            <TabsContent value="settings">
-              <MemberSettings member={member} onMemberUpdate={handleMemberUpdate} />
             </TabsContent>
           </Tabs>
         </section>

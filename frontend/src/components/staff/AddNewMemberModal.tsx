@@ -39,6 +39,7 @@ interface AddNewMemberModalProps {
   onOpenChange: (open: boolean) => void;
   branchId: string;
   onMemberAdded: () => void;
+  authenticatedStaff: any; // ADD THIS LINE
 }
 
 type Step = 'package' | 'members' | 'summary' | 'verification' | 'success';
@@ -58,7 +59,7 @@ interface MemberFormData {
   autoGenerateEmail?: boolean; // New optional field
 }
 
-export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded }: AddNewMemberModalProps) => {
+export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,authenticatedStaff }: AddNewMemberModalProps) => {
   // State management - keeping original structure
   const [currentStep, setCurrentStep] = useState<Step>('package');
   const [loading, setLoading] = useState(false);
@@ -420,6 +421,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
           phone: member.phone,
           branchId: branchId,
           packageId: selectedPackage?.id,
+          staffId: verification.staffId, // Use the verified staff member from the verification step
           emergencyContact: member.emergencyContact || '',
           address: member.address || '',
           nationalId: member.nationalId || '',
@@ -435,6 +437,10 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded 
             paymentMethod: paymentMethod
           })
         };
+
+        console.log('🐛 Authenticated Staff:', authenticatedStaff);
+        console.log('🐛 Staff ID being sent:', authenticatedStaff?.id);
+        console.log('🐛 Staff ID type:', typeof authenticatedStaff?.id);
 
         console.log('Sending member data:', memberData);
         console.log('BranchId type:', typeof branchId, 'value:', branchId);

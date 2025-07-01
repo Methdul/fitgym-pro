@@ -109,6 +109,8 @@ router.post('/',
         branchId, 
         packageId,
         nationalId, // ← Now properly extracted
+        staffId,
+        paymentMethod,
         emergencyContact,
         dateOfBirth,
         address 
@@ -220,8 +222,11 @@ router.post('/',
         package_type: package_.type || 'individual',
         package_name: package_.name,
         package_price: package_.price,
+        package_id: packageId, // ADD THIS LINE
+        payment_method: paymentMethod || 'cash', 
         start_date: new Date().toISOString().split('T')[0], // YYYY-MM-DD format
         expiry_date: new Date(Date.now() + (package_.duration_months || 1) * 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        processed_by_staff_id: staffId?.startsWith('branch_') ? null : staffId, // ← FIX: Only use real staff IDs
         is_verified: false, // Keep original value
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()

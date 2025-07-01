@@ -179,7 +179,7 @@ router.get('/branch/:branchId',
       }
 
       // PHASE 1 FIX: Apply result limits to prevent resource exhaustion
-      const resultLimit = Math.min(parseInt(limit as string) || 100, 1000);
+      const resultLimit = Math.min(parseInt(limit as string) || 10000, 50000);
 
       // 1. Revenue Overview
       const revenueData = await getRevenueOverview(branchId, start, end, resultLimit);
@@ -321,12 +321,12 @@ async function getDetailedTransactions(branchId: string, start: Date, end: Date,
       *,
       members!inner(branch_id, first_name, last_name, status),
       packages(name),
-      branch_staff(first_name, last_name)
+      branch_staff!processed_by_staff_id(first_name, last_name)
     `)
     .eq('members.branch_id', branchId)
     .gte('created_at', start.toISOString())
     .lt('created_at', end.toISOString())
-    .limit(Math.floor(limit / 2))
+    .limit(1000)
     .order('created_at', { ascending: false });
 
   // Add renewal transactions
@@ -364,8 +364,10 @@ async function getDetailedTransactions(branchId: string, start: Date, end: Date,
       type: 'New Membership',
       packageName: member.package_name || 'Unknown Package',
       amount: member.package_price || 0,
-      paymentMethod: 'Unknown',
-      processedBy: 'Staff',
+      paymentMethod: member.payment_method || 'cash',
+      processedBy: member.branch_staff ? 
+        `${member.branch_staff.first_name} ${member.branch_staff.last_name}` : 
+        'System',
       memberStatus: member.status
     });
   });
@@ -440,7 +442,7 @@ async function getPackagePerformance(branchId: string, start: Date, end: Date, l
       .from('members')
       .select('*')
       .eq('branch_id', branchId)
-      .eq('package_type', pkg.type)
+      .eq('package_id', pkg.id)  
       .gte('created_at', start.toISOString())
       .lt('created_at', end.toISOString())
       .limit(Math.floor(limit / 10));
