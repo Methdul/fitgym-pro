@@ -25,27 +25,9 @@ import {
 
 const router = express.Router();
 
-// Import security utilities if available (graceful fallback)
-let hashPin: any = null;
-let verifyPin: any = null;
-let validatePin: any = null;
-let pinAttemptTracker: any = null;
-
-try {
-  const securityModule = require('../lib/security');
-  hashPin = securityModule.hashPin;
-  verifyPin = securityModule.verifyPin;
-  validatePin = securityModule.validatePin;
-  pinAttemptTracker = securityModule.pinAttemptTracker;
-  console.log('✅ Security module loaded - using enhanced PIN security');
-} catch (error) {
-  console.log('⚠️ Security module not found - using legacy PIN handling');
-}
-
-// Helper function to check if new security features are available
-const hasSecurityFeatures = () => {
-  return hashPin && verifyPin && validatePin && pinAttemptTracker;
-};
+// HASH PIN ONLY - No more dual system
+import { hashPin, verifyPin, validatePin } from '../lib/security';
+console.log('✅ Security module loaded - HASH PIN ONLY mode');
 
 // Helper function to safely get branch name from Supabase join result
 const getBranchName = (branches: any): string | undefined => {
@@ -140,15 +122,9 @@ router.post('/debug/create-no-auth',
       }
       
       // Hash PIN
-      let hashedPin: string;
-      if (hasSecurityFeatures()) {
-        hashedPin = await hashPin(pin);
-        console.log('🐛 Using secure PIN hashing');
-      } else {
-        const bcrypt = require('bcrypt');
-        hashedPin = await bcrypt.hash(pin, 12);
-        console.log('🐛 Using fallback PIN hashing');
-      }
+      // HASH PIN ONLY - Always use hashPin
+      const hashedPin = await hashPin(pin);  
+      console.log('🔐 Using secure hashPin for PIN creation');
       
       // Create staff member
       const staffData = {
@@ -223,7 +199,7 @@ router.get('/debug/pin-check/:id',
         hasSecurePin: !!staff.pin_hash,
         pinLength: staff.pin?.length || 0,
         pinHashLength: staff.pin_hash?.length || 0,
-        securityFeatures: hasSecurityFeatures(),
+        securityFeatures: true, // Always true in HASH PIN ONLY mode
         recommendation: staff.pin_hash ? 'Using secure PIN system' : 'Should migrate to secure PIN'
       });
     } catch (error) {
@@ -233,29 +209,26 @@ router.get('/debug/pin-check/:id',
 );
 
 // DEBUG ROUTE - Set PIN
+// DEBUG ROUTE - Set PIN
 router.post('/debug/set-pin/:id',
   async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
-      const { newPin } = req.body;
+      const { newPin } = req.body; // ✅ Make sure this line exists
       
       if (!newPin || !/^\d{4}$/.test(newPin)) {
         return res.status(400).json({ error: 'PIN must be 4 digits' });
       }
       
-      let hashedPin: string;
-      if (hasSecurityFeatures()) {
-        hashedPin = await hashPin(newPin);
-      } else {
-        const bcrypt = require('bcrypt');
-        hashedPin = await bcrypt.hash(newPin, 12);
-      }
+      // HASH PIN ONLY - Always use hashPin
+      const hashedPin = await hashPin(newPin); // ✅ Now newPin is properly defined
+      console.log('🔐 Using secure hashPin for PIN creation');
       
       const { error } = await supabase
         .from('branch_staff')
         .update({ 
           pin_hash: hashedPin,
-          pin: null 
+          pin: null // Clear legacy pin
         })
         .eq('id', id);
         
@@ -381,49 +354,32 @@ router.post('/verify-pin',
       }
 
       // UNIFIED PIN VERIFICATION LOGIC
+      // HASH PIN ONLY - Single verification path
       let isValidPin = false;
-      
-      if (staff.pin_hash && hasSecurityFeatures()) {
-        // New secure system - use hashed PIN from pin_hash column
+
+      // Basic format validation
+      const validation = validatePin(pin);
+      if (!validation.isValid) {
+        return res.status(400).json({
+          status: 'error',
+          error: validation.error,
+          isValid: false
+        });
+      }
+
+      // ONLY verify against pin_hash - no fallbacks
+      if (staff.pin_hash) {
         isValidPin = await verifyPin(pin, staff.pin_hash);
-        console.log('🔐 Using secure PIN verification (pin_hash)');
-      } else if (staff.pin) {
-        // Legacy system - check if it's hashed or plain text
-        if (hasSecurityFeatures()) {
-          // Try to verify as hash first (in case it's stored hashed in pin column)
-          try {
-            isValidPin = await verifyPin(pin, staff.pin);
-            console.log('🔐 Using secure PIN verification (pin column with hash)');
-          } catch (error) {
-            // If hash verification fails, try plain text
-            const validation = basicPinValidation(pin);
-            if (!validation.isValid) {
-              return res.status(400).json({
-                status: 'error',
-                error: validation.error,
-                isValid: false
-              });
-            }
-            isValidPin = staff.pin === pin;
-            console.log('🔐 Using legacy PIN verification (plain text)');
-          }
-        } else {
-          // Basic PIN validation for development/fallback
-          const validation = basicPinValidation(pin);
-          if (!validation.isValid) {
-            return res.status(400).json({
-              status: 'error',
-              error: validation.error,
-              isValid: false
-            });
-          }
-          isValidPin = staff.pin === pin;
-          console.log('🔐 Using basic PIN verification (plain text)');
-        }
+        console.log('🔐 Hash PIN verification:', isValidPin ? 'SUCCESS' : 'FAILED');
       } else {
-        // No PIN set
-        isValidPin = false;
-        console.log('❌ No PIN found for staff member');
+        // Force migration - no PIN verification without hash
+        console.log('❌ Staff has no pin_hash - forcing migration required');
+        return res.status(401).json({
+          status: 'error',
+          error: 'PIN system requires migration. Contact administrator.',
+          isValid: false,
+          requiresMigration: true
+        });
       }
 
       if (!isValidPin) {
@@ -606,14 +562,9 @@ router.post('/',
       }
       
       // ALWAYS HASH PIN AND USE PIN_HASH COLUMN
-      let hashedPin: string;
-      if (hasSecurityFeatures()) {
-        hashedPin = await hashPin(pin);
-      } else {
-        // Fallback: if security module not available, still hash using basic bcrypt
-        const bcrypt = require('bcrypt');
-        hashedPin = await bcrypt.hash(pin, 12);
-      }
+      // HASH PIN ONLY - Always use hashPin
+      const hashedPin = await hashPin(pin);
+      console.log('🐛 Using secure PIN hashing (HASH PIN ONLY mode)');
       
       // Create staff member - ALWAYS use pin_hash column for new staff
       const staffData = {
@@ -711,13 +662,9 @@ router.put('/:id',
         }
         
         // ALWAYS hash PIN and use pin_hash column for updates
-        if (hasSecurityFeatures()) {
-          updateData.pin_hash = await hashPin(updateData.pin);
-        } else {
-          // Fallback: if security module not available, still hash using basic bcrypt
-          const bcrypt = require('bcrypt');
-          updateData.pin_hash = await bcrypt.hash(updateData.pin, 12);
-        }
+        // HASH PIN ONLY - Always use hashPin
+        updateData.pin_hash = await hashPin(updateData.pin);
+        console.log('🔐 PIN updated using secure hashPin');
         
         // Clear legacy pin column and remove from update data
         updateData.pin = null;

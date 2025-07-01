@@ -33,6 +33,7 @@ import {
   UserPlus
 } from 'lucide-react';
 import type { Member, Package as PackageType, BranchStaff } from '@/types';
+import { supabase } from '@/lib/supabase';
 
 interface AddNewMemberModalProps {
   open: boolean;
@@ -95,6 +96,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
   const [lastPaidDate, setLastPaidDate] = useState<string>('');
   const [manualPrice, setManualPrice] = useState<string>('');
 
+  
   // Initialize member forms when package is selected - ORIGINAL LOGIC
   useEffect(() => {
     if (selectedPackage && memberForms.length === 0) {
@@ -422,6 +424,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
           branchId: branchId,
           packageId: selectedPackage?.id,
           staffId: verification.staffId, // Use the verified staff member from the verification step
+          staffPin: verification.pin,  
           emergencyContact: member.emergencyContact || '',
           address: member.address || '',
           nationalId: member.nationalId || '',

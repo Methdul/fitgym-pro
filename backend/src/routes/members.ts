@@ -19,6 +19,8 @@ import {
   Permission,
   rbacUtils
 } from '../middleware/rbac';
+import { verifyPin } from '../lib/security';
+
 
 const router = express.Router();
 
@@ -91,15 +93,27 @@ router.get('/branch/:branchId',
 );
 
 // Create member - ORIGINAL WORKING LOGIC + AUTH CREATION
+// Create member - RBAC PROTECTED + PIN VERIFICATION
 router.post('/',
   authRateLimit,
   authenticate,
   requirePermission(Permission.MEMBERS_WRITE), // Must have write permission
+  // ADD PIN VERIFICATION VALIDATION
+  [
+    require('express-validator').body('staffId')
+      .isUUID()
+      .withMessage('staffId must be a valid UUID'),
+    require('express-validator').body('staffPin')
+      .isLength({ min: 4, max: 4 })
+      .isNumeric()
+      .withMessage('staffPin must be exactly 4 digits'),
+    handleValidationErrors
+  ],
   commonValidations.createMember,
   auditLog('CREATE_MEMBER', 'member'),
   async (req: Request, res: Response) => {
     try {
-      console.log('👥 Creating new member');
+      console.log('👥 Creating new member with PIN verification');
       
       const { 
         firstName, 
@@ -108,13 +122,60 @@ router.post('/',
         phone, 
         branchId, 
         packageId,
-        nationalId, // ← Now properly extracted
-        staffId,
-        paymentMethod,
         emergencyContact,
         dateOfBirth,
-        address 
+        address,
+        staffId,        // PIN verification fields
+        staffPin        // PIN verification fields
       } = req.body;
+      
+      // ✅ ADD PIN VERIFICATION BEFORE ANYTHING ELSE
+      console.log('🔐 Verifying staff PIN for member creation');
+      
+      // Get staff member
+      const { data: staff, error: staffError } = await supabase
+        .from('branch_staff')
+        .select('id, first_name, last_name, pin_hash, branch_id')
+        .eq('id', staffId)
+        .single();
+
+      if (staffError || !staff) {
+        return res.status(404).json({
+          status: 'error',
+          error: 'Staff member not found'
+        });
+      }
+
+      // Verify staff belongs to the same branch
+      if (staff.branch_id !== branchId) {
+        return res.status(403).json({
+          status: 'error',
+          error: 'Staff member not authorized for this branch'
+        });
+      }
+
+      // HASH PIN ONLY - Verify PIN
+      if (!staff.pin_hash) {
+        return res.status(401).json({
+          status: 'error',
+          error: 'Staff PIN requires migration. Contact administrator.',
+          requiresMigration: true
+        });
+      }
+
+      const { verifyPin } = require('../lib/security');
+      const isPinValid = await verifyPin(staffPin, staff.pin_hash);
+      if (!isPinValid) {
+        console.log('❌ Invalid PIN attempt for member creation');
+        return res.status(401).json({
+          status: 'error',
+          error: 'Invalid PIN'
+        });
+      }
+
+      console.log('✅ PIN verified successfully for member creation');
+      
+      // ✅ CONTINUE WITH EXISTING MEMBER CREATION LOGIC
       
       // Verify user has access to this branch
       const userPermissions = await rbacUtils.getUserPermissions(req.user);
@@ -145,10 +206,10 @@ router.post('/',
         });
       }
       
-      // Check if package exists - FIXED WITH duration_months
+      // Check if package exists
       const { data: package_, error: packageError } = await supabase
         .from('packages')
-        .select('id, name, type, price, duration_months, is_active')
+        .select('id, name, type, price, is_active')
         .eq('id', packageId)
         .single();
       
@@ -184,50 +245,22 @@ router.post('/',
         });
       }
       
-      // ✅ NEW: Create auth user FIRST (for login credentials)
-      const memberPassword = nationalId || email.split('@')[0];
-      console.log('🔐 Creating auth user for login...');
-      
-      const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
-        email: email,
-        password: memberPassword,
-        email_confirm: true, // Skip email confirmation
-        user_metadata: {
-          first_name: firstName,
-          last_name: lastName,
-          role: 'member'
-        }
-      });
-      
-      if (authError) {
-        console.error('❌ Auth user creation failed:', authError);
-        return res.status(400).json({
-          status: 'error',
-          error: 'Failed to create login account',
-          message: authError.message || 'Could not create login credentials'
-        });
-      }
-      
-      console.log('✅ Auth user created:', authUser.user.id);
-      
-      // ✅ ORIGINAL WORKING MEMBER CREATION (exactly as before)
+      // Create member
       const memberData = {
         first_name: firstName,
         last_name: lastName,
         email: email,
         phone: phone || null,
         branch_id: branchId,
-        national_id: nationalId || `temp-${Date.now()}`, // ← Now uses actual nationalId
+        national_id: phone || `temp-${Date.now()}`, // Temp solution for required field
         status: 'active',
         package_type: package_.type || 'individual',
         package_name: package_.name,
         package_price: package_.price,
-        package_id: packageId, // ADD THIS LINE
-        payment_method: paymentMethod || 'cash', 
         start_date: new Date().toISOString().split('T')[0], // YYYY-MM-DD format
-        expiry_date: new Date(Date.now() + (package_.duration_months || 1) * 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        processed_by_staff_id: staffId?.startsWith('branch_') ? null : staffId, // ← FIX: Only use real staff IDs
-        is_verified: false, // Keep original value
+        expiry_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 30 days later
+        is_verified: false,
+        processed_by_staff_id: staffId, // Record which staff created this member
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
@@ -239,38 +272,16 @@ router.post('/',
         .single();
       
       if (error) {
-        console.error('❌ Database error creating member:', error);
-        
-        // ⚠️ CLEANUP: Delete auth user if member creation fails
-        try {
-          await supabase.auth.admin.deleteUser(authUser.user.id);
-          console.log('🧹 Cleaned up auth user after member creation failure');
-        } catch (cleanupError) {
-          console.error('⚠️ Failed to cleanup auth user:', cleanupError);
-        }
-        
-        return res.status(500).json({
-          status: 'error',
-          error: 'Failed to create member record',
-          message: 'Database error occurred'
-        });
+        console.error('Database error creating member:', error);
+        throw new Error('Failed to create member');
       }
       
       console.log('✅ Member created successfully:', data.id);
       
-      // ✅ NEW: Return with REAL credentials instead of fake ones
       res.status(201).json({
         status: 'success',
-        data: {
-          ...data,
-          // Include real login credentials for frontend
-          loginCredentials: {
-            email: email,
-            password: memberPassword, // Real password that works
-            authUserId: authUser.user.id
-          }
-        },
-        message: 'Member and login account created successfully'
+        data,
+        message: 'Member created successfully'
       });
       
     } catch (error) {
