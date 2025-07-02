@@ -421,12 +421,38 @@ router.post('/verify-pin',
       console.log('✅ PIN verified successfully for staff:', staffId);
 
       // Create session token for subsequent requests
-      const sessionToken = `staff_${staff.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const crypto = require('crypto');
+      const sessionToken = `staff_${staffId}_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
+      const expiresAt = new Date(Date.now() + (4 * 60 * 60 * 1000)); // 4 hours
+
+      // Insert session into database
+      const { error: sessionError } = await supabase
+        .from('branch_sessions')
+        .insert({
+          session_token: sessionToken,
+          staff_id: staffId,
+          branch_id: staff.branch_id,
+          is_active: true,
+          expires_at: expiresAt.toISOString(),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
+
+      if (sessionError) {
+        console.error('❌ Failed to create session:', sessionError);
+        return res.status(500).json({
+          status: 'error',
+          error: 'Failed to create session'
+        });
+      }
+
+      console.log('✅ Database session created:', sessionToken);
+
 
       res.json({
         status: 'success',
         isValid: true,
-        sessionToken,
+        sessionToken: sessionToken, 
         staff: {
           id: staff.id,
           firstName: staff.first_name,

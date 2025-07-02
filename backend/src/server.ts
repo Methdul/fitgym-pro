@@ -90,9 +90,14 @@ app.use(express.urlencoded({
 console.log('✅ Basic middleware applied');
 
 // APPLY RATE LIMITING TO ALL /api/* ROUTES
-console.log('🚦 Applying rate limiting...');
-app.use('/api', apiRateLimit);
-console.log('✅ Rate limiting applied to /api/* routes');
+// Skip rate limiting for localhost in development
+app.use('/api', (req, res, next) => {
+  if (req.ip === '::1' || req.ip === '127.0.0.1' || req.hostname === 'localhost') {
+    console.log('🚫 Skipping rate limit for localhost');
+    return next(); // Skip rate limiting for localhost
+  }
+  return apiRateLimit(req, res, next);
+});
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

@@ -108,10 +108,11 @@ export const authRateLimit = createRateLimit(
 );
 
 export const apiRateLimit = createRateLimit(
-  1 * 60 * 1000, // 1 minute (reduced window)
-  100, // 100 requests per minute (much more reasonable for development)
+  1 * 60 * 1000, // 1 minute
+  1000, // 1000 requests per minute (much higher)
   'Too many API requests, please try again later'
 );
+
 
 export const strictRateLimit = createRateLimit(
   1 * 60 * 1000, // 1 minute (reduced window)

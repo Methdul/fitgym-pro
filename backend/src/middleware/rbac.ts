@@ -59,6 +59,7 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     Permission.STAFF_READ,
     Permission.STAFF_WRITE,
     Permission.STAFF_MANAGE_PINS,
+    Permission.STAFF_DELETE,  
     Permission.PACKAGES_READ,
     Permission.PACKAGES_WRITE,
     Permission.PACKAGES_PRICING,

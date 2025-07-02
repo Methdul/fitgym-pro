@@ -21,7 +21,6 @@ import {
 } from '../middleware/rbac';
 import { verifyPin } from '../lib/security';
 
-
 const router = express.Router();
 
 // Get members by branch - RBAC PROTECTED
@@ -209,7 +208,7 @@ router.post('/',
       // Check if package exists
       const { data: package_, error: packageError } = await supabase
         .from('packages')
-        .select('id, name, type, price, is_active')
+        .select('id, name, type, price, duration_months, is_active')
         .eq('id', packageId)
         .single();
       
@@ -245,25 +244,77 @@ router.post('/',
         });
       }
       
-      // Create member
-      const memberData = {
-        first_name: firstName,
-        last_name: lastName,
-        email: email,
-        phone: phone || null,
-        branch_id: branchId,
-        national_id: phone || `temp-${Date.now()}`, // Temp solution for required field
-        status: 'active',
-        package_type: package_.type || 'individual',
-        package_name: package_.name,
-        package_price: package_.price,
-        start_date: new Date().toISOString().split('T')[0], // YYYY-MM-DD format
-        expiry_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 30 days later
-        is_verified: false,
-        processed_by_staff_id: staffId, // Record which staff created this member
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
+        // FIXED: Handle both new and existing members with proper date calculations
+        const { 
+          startDate, 
+          expiryDate, 
+          duration = 1, 
+          nationalId
+        } = req.body;
+
+        // ADD THIS DEBUG BLOCK
+        console.log('🔍 COMPLETE REQUEST BODY:', JSON.stringify(req.body, null, 2));
+        console.log('🔍 EXTRACTED VALUES:', {
+          startDate,
+          expiryDate, 
+          duration,
+          nationalId,
+          firstName,
+          lastName
+        });
+
+
+        // Calculate dates based on whether it's a new or existing member
+        let memberStartDate, memberExpiryDate, memberStatus;
+
+        if (startDate) {
+          // Existing member: use provided start date (last payment date)
+          memberStartDate = startDate;
+          if (expiryDate) {
+            memberExpiryDate = expiryDate;
+          } else {
+            // Calculate expiry from start date + package duration
+            const start = new Date(startDate);
+            start.setMonth(start.getMonth() + (duration || package_.duration_months || 1));
+            memberExpiryDate = start.toISOString().split('T')[0];
+          }
+        } else {
+          // New member: use current date
+          memberStartDate = new Date().toISOString().split('T')[0];
+          const start = new Date();
+          start.setMonth(start.getMonth() + (duration || package_.duration_months || 1));
+          memberExpiryDate = start.toISOString().split('T')[0];
+        }
+
+        // Calculate status based on expiry date
+        const now = new Date();
+        const expiryDateObj = new Date(memberExpiryDate);
+        memberStatus = expiryDateObj > now ? 'active' : 'expired';
+
+        console.log('📅 Date calculations:', {
+          startDate: memberStartDate,
+          expiryDate: memberExpiryDate,
+          status: memberStatus,
+          packageDuration: package_.duration_months
+        });
+
+        const memberData = {
+          first_name: firstName,
+          last_name: lastName,
+          email: email,
+          phone: phone || null,
+          branch_id: branchId,
+          national_id: nationalId || phone || `temp-${Date.now()}`,
+          status: memberStatus, // Use calculated status
+          package_type: package_.type || 'individual',
+          package_name: package_.name,
+          package_price: package_.price,
+          start_date: memberStartDate, // Use calculated start date
+          expiry_date: memberExpiryDate, // Use calculated expiry date
+          is_verified: false,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
       
       const { data, error } = await supabase
         .from('members')

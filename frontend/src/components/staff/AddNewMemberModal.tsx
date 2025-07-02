@@ -58,6 +58,7 @@ interface MemberFormData {
   emergencyPhone: string;
   nationalId: string;
   autoGenerateEmail?: boolean; // New optional field
+  lastPaymentDate?: string;
 }
 
 export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,authenticatedStaff }: AddNewMemberModalProps) => {
@@ -289,7 +290,10 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
     const member = memberForms[currentMemberIndex];
     if (!member) return false;
     
-    if (member.isExisting) return true;
+    if (member.isExisting) {
+      // For existing members, require lastPaymentDate
+      return !!member.lastPaymentDate;
+    }
 
     const required = ['firstName', 'lastName', 'email', 'phone', 'nationalId'];
     return required.every(field => member[field as keyof MemberFormData]?.toString().trim() !== '');
@@ -411,6 +415,73 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
         const member = memberForms[i];
         
         // Skip if existing member (they're already in the system)
+        // Handle existing members differently
+        if (member.isExisting && member.lastPaymentDate) {
+          // Calculate proper dates from last payment date
+          const lastPayment = new Date(member.lastPaymentDate);
+          const packageDuration = selectedPackage?.duration_months || duration;
+          
+          // Calculate expiry date from last payment
+          const calculatedExpiry = new Date(lastPayment);
+          calculatedExpiry.setMonth(calculatedExpiry.getMonth() + packageDuration);
+          
+          // Determine status based on expiry
+          const now = new Date();
+          const memberStatus = calculatedExpiry > now ? 'active' : 'expired';
+          
+          console.log('📅 Existing member calculation:', {
+            lastPaymentDate: member.lastPaymentDate,
+            packageDuration,
+            calculatedExpiry: calculatedExpiry.toISOString().split('T')[0],
+            status: memberStatus
+          });
+
+          const memberData = {
+            firstName: member.firstName,
+            lastName: member.lastName,
+            email: member.email,
+            phone: member.phone,
+            branchId: branchId,
+            packageId: selectedPackage?.id,
+            nationalId: member.nationalId,
+            startDate: member.lastPaymentDate, // Use last payment as start date
+            duration: packageDuration, // Send duration to backend
+            // Backend will calculate expiry_date and status
+          };
+
+          console.log('Sending existing member data:', memberData);
+
+          const response = await fetch(
+            `${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/members`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...getAuthHeaders()
+              },
+              body: JSON.stringify(memberData)
+            }
+          );
+
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.message || errorData.error || 'Failed to create existing member');
+          }
+
+          const result = await response.json();
+          
+          const memberWithCredentials = {
+            ...result.data,
+            accountEmail: member.email,
+            accountPassword: member.nationalId,
+            fullName: `${result.data.first_name} ${result.data.last_name}`
+          };
+          
+          createdMembers.push(memberWithCredentials);
+          continue; // Continue to next member
+        }
+
+        // Skip if existing member without lastPaymentDate
         if (member.isExisting) {
           continue;
         }
@@ -766,6 +837,23 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
                     disabled={currentMember.isExisting}
                   />
                 </div>
+
+                {/* ADD THIS NEW FIELD */}
+                {currentMember.isExisting && (
+                  <div className="md:col-span-2">
+                    <Label htmlFor="lastPaymentDate" className="text-foreground">Last Payment Date *</Label>
+                    <Input
+                      id="lastPaymentDate"
+                      type="date"
+                      value={currentMember.lastPaymentDate || ''}
+                      onChange={(e) => updateMemberForm(currentMemberIndex, { lastPaymentDate: e.target.value })}
+                      className="mt-1 bg-background border-border text-foreground"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Enter when this person last paid for their membership
+                    </p>
+                  </div>
+                )}
 
                 {/* Enhanced Email Section with Auto-Generate Option */}
                 <div className="space-y-3">

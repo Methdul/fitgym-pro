@@ -235,6 +235,9 @@ export const StaffManagement = ({ staff, branchId, onStaffUpdate }: StaffManagem
 
       console.log('✅ PIN verified successfully, proceeding with deletion...');
 
+      // MINIMAL FIX: Wait for session token to be stored
+      await new Promise(resolve => setTimeout(resolve, 100));
+
       // Now delete the staff member - the session token is automatically included
       const { error: deleteError } = await db.staff.delete(selectedStaff!.id);
 
