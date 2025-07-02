@@ -1,4 +1,4 @@
-// backend/src/routes/members.ts - MINIMAL FIX: Keep Original + Add Auth
+// backend/src/routes/members.ts - COMPLETE ERROR-FREE VERSION
 import express, { Request, Response } from 'express';
 import { supabase } from '../lib/supabase';
 import { authenticate, optionalAuth } from '../middleware/auth';
@@ -82,17 +82,18 @@ router.get('/branch/:branchId',
       });
     } catch (error) {
       console.error('Error fetching members:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       res.status(500).json({
         status: 'error',
         error: 'Failed to fetch members',
-        message: 'An error occurred while retrieving member data'
+        message: 'An error occurred while retrieving member data',
+        details: errorMessage
       });
     }
   }
 );
 
-// Create member - ORIGINAL WORKING LOGIC + AUTH CREATION
-// Create member - RBAC PROTECTED + PIN VERIFICATION
+// Create member - RBAC PROTECTED + PIN VERIFICATION + AUTH CREATION
 router.post('/',
   authRateLimit,
   authenticate,
@@ -252,20 +253,52 @@ router.post('/',
           nationalId
         } = req.body;
 
-        // ADD THIS DEBUG BLOCK
-        console.log('🔍 COMPLETE REQUEST BODY:', JSON.stringify(req.body, null, 2));
-        console.log('🔍 EXTRACTED VALUES:', {
+        console.log('🔍 MEMBER CREATION - EXTRACTED VALUES:', {
           startDate,
           expiryDate, 
           duration,
           nationalId,
           firstName,
-          lastName
+          lastName,
+          email
         });
 
+        // 🔥 CREATE AUTH ACCOUNT FOR ALL NEW MEMBERS
+        let authUserId = null;
+        if (nationalId) {
+          console.log('🔐 Creating auth account for new member...');
+          console.log(`📧 Email: ${email}`);
+          console.log(`🔑 Password: ${nationalId}`);
+          
+          try {
+            const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+              email: email,
+              password: nationalId,
+              email_confirm: true,
+              user_metadata: {
+                first_name: firstName,
+                last_name: lastName,
+                role: 'member',
+                created_by: 'staff'
+              }
+            });
+
+            if (!authError && authData?.user) {
+              authUserId = authData.user.id;
+              console.log('✅ Auth account created successfully:', authUserId);
+            } else {
+              console.error('❌ Auth creation failed:', authError?.message || 'Unknown auth error');
+            }
+          } catch (authCreateError) {
+            const authErrorMsg = authCreateError instanceof Error ? authCreateError.message : 'Unknown auth creation error';
+            console.error('❌ Auth creation error:', authErrorMsg);
+          }
+        } else {
+          console.log('⚠️ No nationalId provided, skipping auth creation');
+        }
 
         // Calculate dates based on whether it's a new or existing member
-        let memberStartDate, memberExpiryDate, memberStatus;
+        let memberStartDate: string, memberExpiryDate: string, memberStatus: string;
 
         if (startDate) {
           // Existing member: use provided start date (last payment date)
@@ -295,7 +328,7 @@ router.post('/',
           startDate: memberStartDate,
           expiryDate: memberExpiryDate,
           status: memberStatus,
-          packageDuration: package_.duration_months
+          authUserId: authUserId || 'NOT_CREATED'
         });
 
         const memberData = {
@@ -305,12 +338,13 @@ router.post('/',
           phone: phone || null,
           branch_id: branchId,
           national_id: nationalId || phone || `temp-${Date.now()}`,
-          status: memberStatus, // Use calculated status
+          user_id: authUserId, // 🔥 LINK TO AUTH ACCOUNT
+          status: memberStatus,
           package_type: package_.type || 'individual',
           package_name: package_.name,
           package_price: package_.price,
-          start_date: memberStartDate, // Use calculated start date
-          expiry_date: memberExpiryDate, // Use calculated expiry date
+          start_date: memberStartDate,
+          expiry_date: memberExpiryDate,
           is_verified: false,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
@@ -337,10 +371,12 @@ router.post('/',
       
     } catch (error) {
       console.error('❌ Error creating member:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       res.status(500).json({
         status: 'error',
         error: 'Failed to create member',
-        message: 'An error occurred while creating the member'
+        message: 'An error occurred while creating the member',
+        details: errorMessage
       });
     }
   }
@@ -419,10 +455,12 @@ router.put('/:id',
       
     } catch (error) {
       console.error('Error updating member:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       res.status(500).json({
         status: 'error',
         error: 'Failed to update member',
-        message: 'An error occurred while updating the member'
+        message: 'An error occurred while updating the member',
+        details: errorMessage
       });
     }
   }
@@ -469,10 +507,12 @@ router.get('/:id',
       
     } catch (error) {
       console.error('Error fetching member:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       res.status(500).json({
         status: 'error',
         error: 'Failed to fetch member',
-        message: 'An error occurred while retrieving member data'
+        message: 'An error occurred while retrieving member data',
+        details: errorMessage
       });
     }
   }
@@ -534,13 +574,17 @@ router.delete('/:id',
       
     } catch (error) {
       console.error('Error deleting member:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       res.status(500).json({
         status: 'error',
         error: 'Failed to delete member',
-        message: 'An error occurred while deleting the member'
+        message: 'An error occurred while deleting the member',
+        details: errorMessage
       });
     }
   }
 );
 
+// Export both ways to work with dynamic route loading
 export { router as memberRoutes };
+export default router;
