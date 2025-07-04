@@ -371,7 +371,7 @@ const sanitizeRequestData = async (body: any, action: string) => {
     
     const auditData = {
       // Financial data for analytics - ENHANCED FIELD MAPPING
-      package_price: body.amountPaid || body.package_price || body.packagePrice || body.totalAmount,
+      package_price: body.customPrice || body.amountPaid || body.package_price || body.packagePrice || body.totalAmount,  // ← ADD body.customPrice ||
       payment_method: body.paymentMethod || body.payment_method,
       package_name: packageInfo?.name || body.package_name || body.packageName || 'Unknown Package',
       package_type: packageInfo?.type || body.package_type || body.packageType,
@@ -387,8 +387,8 @@ const sanitizeRequestData = async (body: any, action: string) => {
       staff_pin_provided: body.staffPin ? 'YES' : 'NO', // Don't store actual PIN
       
       // Additional member info for better tracking
-      member_first_name: body.firstName,
-      member_last_name: body.lastName,
+      member_first_name: body.firstName || body.first_name,  // ← ADD || body.first_name
+      member_last_name: body.lastName || body.last_name,   // ← ADD || body.last_name
       member_email: body.email,
       
       // Payment details
@@ -398,6 +398,17 @@ const sanitizeRequestData = async (body: any, action: string) => {
     };
     
     console.log('💰 AUDIT DEBUG - Captured Financial Data:', JSON.stringify(auditData, null, 2));
+
+    console.log('🔍 CRITICAL FIELD DEBUG:', {
+    customPrice: body.customPrice,
+    package_price_captured: auditData.package_price,
+    firstName: body.firstName,
+    lastName: body.lastName,
+    member_first_name_captured: auditData.member_first_name,
+    member_last_name_captured: auditData.member_last_name,
+    paymentMethod: body.paymentMethod,
+    payment_method_captured: auditData.payment_method
+  });
     return auditData;
   }
   
