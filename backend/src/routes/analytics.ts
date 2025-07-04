@@ -311,10 +311,10 @@ router.get('/branch/:branchId/activity',
 );
 
 // ====================================================================
-// PHASE 3: NEW AUDIT-BASED ANALYTICS FUNCTIONS
+// PHASE 3: NEW AUDIT-BASED ANALYTICS FUNCTIONS - ENHANCED VERSION
 // ====================================================================
 
-// NEW: Get revenue from audit logs instead of direct table queries
+// NEW: Get revenue from audit logs instead of direct table queries - ENHANCED
 async function getAuditBasedRevenue(branchId: string, start: Date, end: Date, limit: number): Promise<RevenueData> {
   console.log('📊 Getting audit-based revenue data');
   
@@ -337,7 +337,7 @@ async function getAuditBasedRevenue(branchId: string, start: Date, end: Date, li
 
   console.log(`📊 Found ${auditLogs?.length || 0} financial audit logs`);
 
-  // Extract financial data from request_data JSONB
+  // Extract financial data from request_data JSONB - ENHANCED VERSION
   let totalRevenue = 0;
   let renewalRevenue = 0;
   let newMemberRevenue = 0;
@@ -345,18 +345,40 @@ async function getAuditBasedRevenue(branchId: string, start: Date, end: Date, li
 
   auditLogs?.forEach(log => {
     const requestData = log.request_data || {};
-    const amount = parseFloat(requestData.package_price || requestData.amount_paid || 0);
+    
+    // ENHANCED: Better amount extraction with multiple fallbacks
+    let amount = 0;
+    if (requestData.package_price) {
+      amount = parseFloat(requestData.package_price);
+    } else if (requestData.total_amount) {
+      amount = parseFloat(requestData.total_amount);
+    } else if (requestData.amount_paid) {
+      amount = parseFloat(requestData.amount_paid);
+    }
+    
+    console.log(`💰 Processing audit log: Action=${log.action}, Amount=${amount}, Package=${requestData.package_name}`);
     
     if (amount > 0) {
       totalRevenue += amount;
       
       if (log.action === 'PROCESS_MEMBER_RENEWAL') {
         renewalRevenue += amount;
+        console.log(`📈 Added ${amount} to renewal revenue`);
       } else if (log.action === 'CREATE_MEMBER') {
         newMemberRevenue += amount;
+        console.log(`🆕 Added ${amount} to new member revenue`);
       }
+      
+      // Check for upgrades (when renewal is more expensive than usual)
+      if (log.action === 'PROCESS_MEMBER_RENEWAL' && amount > 50) { // Simplified upgrade detection
+        upgrades += amount * 0.1; // Assume 10% of high-value renewals are upgrades
+      }
+    } else {
+      console.log(`⚠️ Audit log ${log.id} has no valid amount: ${JSON.stringify(requestData)}`);
     }
   });
+
+  console.log(`📊 Revenue Summary: Total=${totalRevenue}, New=${newMemberRevenue}, Renewals=${renewalRevenue}, Upgrades=${upgrades}`);
 
   // Calculate comparison with previous period (simplified for now)
   const periodLength = end.getTime() - start.getTime();
@@ -399,7 +421,7 @@ async function getAuditBasedRevenue(branchId: string, start: Date, end: Date, li
   };
 }
 
-// NEW: Get detailed transactions from audit logs
+// NEW: Get detailed transactions from audit logs - ENHANCED
 async function getAuditBasedTransactions(branchId: string, start: Date, end: Date, limit: number): Promise<Transaction[]> {
   console.log('📊 Getting audit-based transactions');
   
@@ -419,24 +441,55 @@ async function getAuditBasedTransactions(branchId: string, start: Date, end: Dat
     throw error;
   }
 
-  // Transform audit logs into transaction format
+  // Transform audit logs into transaction format - ENHANCED VERSION
   const transactions: Transaction[] = auditLogs?.map(log => {
     const requestData = log.request_data || {};
     const responseData = log.response_data || {};
     
+    // ENHANCED: Better member name extraction
+    let memberName = 'Unknown Member';
+    if (responseData.member_name) {
+      memberName = responseData.member_name;
+    } else if (requestData.member_first_name && requestData.member_last_name) {
+      memberName = `${requestData.member_first_name} ${requestData.member_last_name}`;
+    }
+    
+    // ENHANCED: Better amount extraction
+    let amount = 0;
+    if (requestData.package_price) {
+      amount = parseFloat(requestData.package_price);
+    } else if (requestData.total_amount) {
+      amount = parseFloat(requestData.total_amount);
+    }
+    
+    // ENHANCED: Better package name extraction
+    let packageName = 'Unknown Package';
+    if (requestData.package_name && requestData.package_name !== 'Unknown Package') {
+      packageName = requestData.package_name;
+    }
+    
+    // ENHANCED: Better payment method extraction
+    let paymentMethod = 'Unknown';
+    if (requestData.payment_method) {
+      paymentMethod = requestData.payment_method === 'cash' ? 'Cash' : 
+                      requestData.payment_method === 'card' ? 'Card' : 
+                      requestData.payment_method;
+    }
+    
     return {
       id: log.id,
       date: log.timestamp,
-      memberName: responseData.member_name || 'Unknown Member',
+      memberName: memberName,
       type: log.action === 'CREATE_MEMBER' ? 'New Membership' : 'Renewal',
-      packageName: requestData.package_name || 'Unknown Package',
-      amount: parseFloat(requestData.package_price || requestData.amount_paid || 0),
-      paymentMethod: requestData.payment_method || 'Unknown',
-      processedBy: log.user_email || 'Unknown Staff',
+      packageName: packageName,
+      amount: amount,
+      paymentMethod: paymentMethod,
+      processedBy: log.user_email?.split('@')[0] || 'Unknown Staff',
       memberStatus: responseData.success ? 'Active' : 'Pending'
     };
   }) || [];
 
+  console.log(`📊 Transformed ${transactions.length} audit logs into transactions`);
   return transactions;
 }
 
@@ -491,7 +544,7 @@ async function getAuditBasedMemberAnalytics(branchId: string, start: Date, end: 
   };
 }
 
-// NEW: Get staff performance from audit logs
+// NEW: Get staff performance from audit logs - ENHANCED
 async function getAuditBasedStaffPerformance(branchId: string, start: Date, end: Date, limit: number): Promise<StaffPerformance[]> {
   console.log('📊 Getting audit-based staff performance');
   
@@ -511,7 +564,7 @@ async function getAuditBasedStaffPerformance(branchId: string, start: Date, end:
     throw error;
   }
 
-  // Group by staff member
+  // Group by staff member - ENHANCED
   const staffStats: { [email: string]: any } = {};
   
   auditLogs?.forEach(log => {
@@ -528,7 +581,17 @@ async function getAuditBasedStaffPerformance(branchId: string, start: Date, end:
       };
     }
     
-    const amount = parseFloat(log.request_data?.package_price || log.request_data?.amount_paid || 0);
+    // ENHANCED: Better amount extraction
+    const requestData = log.request_data || {};
+    let amount = 0;
+    if (requestData.package_price) {
+      amount = parseFloat(requestData.package_price);
+    } else if (requestData.total_amount) {
+      amount = parseFloat(requestData.total_amount);
+    } else if (requestData.amount_paid) {
+      amount = parseFloat(requestData.amount_paid);
+    }
+    
     staffStats[staffEmail].revenue += amount;
     staffStats[staffEmail].totalTransactions += 1;
     
@@ -537,6 +600,8 @@ async function getAuditBasedStaffPerformance(branchId: string, start: Date, end:
     } else if (log.action === 'PROCESS_MEMBER_RENEWAL') {
       staffStats[staffEmail].renewals += 1;
     }
+    
+    console.log(`👥 Staff ${staffEmail}: +${amount} revenue, Action: ${log.action}`);
   });
 
   // Convert to array format
@@ -550,6 +615,7 @@ async function getAuditBasedStaffPerformance(branchId: string, start: Date, end:
     revenue: stats.revenue
   }));
 
+  console.log(`📊 Staff performance calculated for ${performance.length} staff members`);
   return performance.sort((a, b) => b.revenue - a.revenue);
 }
 

@@ -338,107 +338,67 @@ export const getUserRoleInfo = async (req: Request, res: Response) => {
   }
 };
 
-// Audit logging for sensitive operations
-// Audit logging for sensitive operations - FIXED VERSION
-export const auditLog = (action: string, resourceType: string) => {
-  return async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      console.log(`🔍 AUDIT MIDDLEWARE: ${action} - ${resourceType}`);
-      console.log(`🔍 USER OBJECT:`, req.user);
-      console.log(`🔍 REQUEST METHOD:`, req.method);
-      console.log(`🔍 REQUEST PATH:`, req.path);
-      
-      // Store original res.json to intercept response
-      const originalJson = res.json;
-      
-      res.json = function(data: any) {
-        console.log(`🔍 RESPONSE STATUS:`, res.statusCode);
-        console.log(`🔍 USER EXISTS:`, !!req.user);
-        console.log(`🔍 STATUS < 400:`, res.statusCode < 400);
-        
-        // Log the action after successful response
-        if (req.user && res.statusCode < 400) {
-          console.log(`📋 CREATING AUDIT LOG FOR:`, action);
-          
-          // Ensure we have the required fields
-          const userId = req.user.id || req.user.userId;
-          const userEmail = req.user.email || req.user.userEmail;
-          
-          if (!userId || !userEmail) {
-            console.error(`❌ MISSING USER DATA - ID: ${userId}, Email: ${userEmail}`);
-            return originalJson.call(this, data);
-          }
-          
-          logAuditEvent({
-            userId: userId,
-            userEmail: userEmail,
-            action,
-            resourceType,
-            resourceId: req.params.id || req.body?.id || null,
-            branchId: req.params.branchId || req.body?.branchId || null,
-            ipAddress: req.ip || req.connection?.remoteAddress || null,
-            userAgent: req.get('User-Agent') || null,
-            timestamp: new Date().toISOString(),
-            success: true,
-            statusCode: res.statusCode,
-            requestData: {
-              method: req.method,
-              path: req.path,
-              params: req.params,
-              query: req.query,
-              body: sanitizeRequestData(req.body, action),
-              headers: {
-                'content-type': req.get('Content-Type'),
-                'user-agent': req.get('User-Agent')
-              }
-            },
-            responseData: sanitizeResponseData(data, action)
-          });
-        } else {
-          if (!req.user) {
-            console.log(`⚠️ NO AUDIT LOG - Missing user object`);
-          }
-          if (res.statusCode >= 400) {
-            console.log(`⚠️ NO AUDIT LOG - Error status code: ${res.statusCode}`);
-          }
-        }
-        
-        // Call original json method
-        return originalJson.call(this, data);
-      };
-      
-      next();
-      
-    } catch (error: any) {
-      console.error('💥 AUDIT MIDDLEWARE ERROR:', error);
-      next(); // Continue even if audit setup fails
-    }
-  };
-};
-
-
-// Sanitize request data to capture financial information safely
-const sanitizeRequestData = (body: any, action: string) => {
+// Sanitize request data to capture financial information safely - ENHANCED VERSION  
+const sanitizeRequestData = async (body: any, action: string) => {
   if (!body) return null;
+
+  console.log('🚨 DEBUG - FULL REQUEST BODY:', JSON.stringify(body, null, 2));
+  
+  console.log('🔍 AUDIT DEBUG - Request Body:', JSON.stringify(body, null, 2));
+  
+  console.log('🔍 AUDIT DEBUG - Request Body:', JSON.stringify(body, null, 2));
   
   // For financial operations, capture key financial data
   if (action === 'CREATE_MEMBER' || action === 'PROCESS_MEMBER_RENEWAL') {
-    return {
-      // Financial data for analytics
-      package_price: body.package_price || body.packagePrice || body.amountPaid,
-      payment_method: body.payment_method || body.paymentMethod,
-      package_name: body.package_name || body.packageName,
-      package_id: body.package_id || body.packageId,
-      duration_months: body.duration_months || body.durationMonths,
+    // Get package information if packageId is provided
+    let packageInfo = null;
+    const packageId = body.packageId || body.package_id;
+    
+    if (packageId) {
+      try {
+        const { data: packageData } = await supabase
+          .from('packages')
+          .select('name, type, price')
+          .eq('id', packageId)
+          .single();
+        
+        packageInfo = packageData;
+        console.log('📦 AUDIT DEBUG - Package Info:', packageInfo);
+      } catch (error) {
+        console.error('❌ AUDIT DEBUG - Failed to fetch package info:', error);
+      }
+    }
+    
+    const auditData = {
+      // Financial data for analytics - ENHANCED FIELD MAPPING
+      package_price: body.amountPaid || body.package_price || body.packagePrice || body.totalAmount,
+      payment_method: body.paymentMethod || body.payment_method,
+      package_name: packageInfo?.name || body.package_name || body.packageName || 'Unknown Package',
+      package_type: packageInfo?.type || body.package_type || body.packageType,
+      package_id: packageId,
+      duration_months: body.duration || body.duration_months || body.durationMonths,
       
       // Member data (non-sensitive)
-      member_type: body.package_type || body.packageType,
-      branch_id: body.branch_id || body.branchId,
+      member_type: packageInfo?.type || body.package_type || body.packageType,
+      branch_id: body.branchId || body.branch_id,
       
-      // Staff data
-      staff_id: body.staff_id || body.staffId,
-      processed_by: body.processed_by_staff_id || body.processedByStaffId
+      // Staff data - GET FROM VERIFICATION SECTION
+      staff_id: body.staffId || body.staff_id,
+      staff_pin_provided: body.staffPin ? 'YES' : 'NO', // Don't store actual PIN
+      
+      // Additional member info for better tracking
+      member_first_name: body.firstName,
+      member_last_name: body.lastName,
+      member_email: body.email,
+      
+      // Payment details
+      start_date: body.startDate,
+      expiry_date: body.expiryDate,
+      total_amount: body.amountPaid || body.totalAmount
     };
+    
+    console.log('💰 AUDIT DEBUG - Captured Financial Data:', JSON.stringify(auditData, null, 2));
+    return auditData;
   }
   
   // For other operations, capture basic data
@@ -447,14 +407,16 @@ const sanitizeRequestData = (body: any, action: string) => {
     resource_count: Array.isArray(body) ? body.length : 1,
     has_sensitive_data: !!(body.pin || body.password || body.national_id),
     data_keys: Object.keys(body || {}).filter(key => 
-      !['pin', 'password', 'national_id', 'pin_hash'].includes(key)
+      !['pin', 'password', 'national_id', 'pin_hash', 'staffPin'].includes(key)
     )
   };
 };
 
-// Sanitize response data to capture success metrics
+// Sanitize response data to capture success metrics - ENHANCED VERSION
 const sanitizeResponseData = (responseData: any, action: string) => {
   if (!responseData) return null;
+  
+  console.log('🔍 AUDIT DEBUG - Response Data:', JSON.stringify(responseData, null, 2));
   
   // Extract useful response information
   const response = {
@@ -463,22 +425,36 @@ const sanitizeResponseData = (responseData: any, action: string) => {
     timestamp: new Date().toISOString()
   };
   
-  // For financial operations, capture result data
+  // For financial operations, capture result data - ENHANCED
   if (action === 'CREATE_MEMBER' || action === 'PROCESS_MEMBER_RENEWAL') {
-    return {
+    const enhancedResponse = {
       ...response,
       // Success metrics
-      member_id: responseData.data?.id || responseData.data?.member?.id,
+      member_id: responseData.data?.id || responseData.data?.member?.id || responseData.data?.memberId,
       renewal_id: responseData.data?.renewal?.id,
       transaction_successful: responseData.status === 'success',
       
       // Financial confirmation
-      amount_processed: responseData.data?.amount_paid || responseData.data?.package_price,
-      new_expiry_date: responseData.data?.member?.expiry_date || responseData.data?.new_expiry,
+      amount_processed: responseData.data?.amount_paid || responseData.data?.package_price || responseData.data?.amountPaid,
+      new_expiry_date: responseData.data?.member?.expiry_date || responseData.data?.new_expiry || responseData.data?.expiryDate,
+      
+      // ENHANCED: Capture member name from response
+      member_name: responseData.data?.member_name || 
+                   responseData.data?.memberName ||
+                   (responseData.data?.firstName && responseData.data?.lastName ? 
+                    `${responseData.data.firstName} ${responseData.data.lastName}` : null) ||
+                   (responseData.data?.member?.first_name && responseData.data?.member?.last_name ?
+                    `${responseData.data.member.first_name} ${responseData.data.member.last_name}` : null),
+      
+      // Package information
+      package_name: responseData.data?.package?.name || responseData.data?.packageName,
       
       // Avoid sensitive data
       message: responseData.message
     };
+    
+    console.log('💰 AUDIT DEBUG - Captured Response Data:', JSON.stringify(enhancedResponse, null, 2));
+    return enhancedResponse;
   }
   
   // For other operations
@@ -489,7 +465,7 @@ const sanitizeResponseData = (responseData: any, action: string) => {
     message: responseData.message
   };
 };
-// Function to log audit events
+
 // Function to log audit events - FIXED VERSION
 const logAuditEvent = async (auditData: any) => {
   try {
@@ -550,6 +526,105 @@ const logAuditEvent = async (auditData: any) => {
     });
     // Don't throw - audit logging failure shouldn't break the request
   }
+};
+
+// Audit logging for sensitive operations - ENHANCED VERSION
+export const auditLog = (action: string, resourceType: string) => {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      console.log(`🔍 AUDIT MIDDLEWARE: ${action} - ${resourceType}`);
+      
+      // Store original res.json to intercept response
+      const originalJson = res.json;
+      
+      res.json = function(data: any) {
+        console.log(`🔍 RESPONSE STATUS:`, res.statusCode);
+        
+        // Log the action after successful response (async but don't await)
+        if (req.user && res.statusCode < 400) {
+          console.log(`📋 CREATING AUDIT LOG FOR:`, action);
+          
+          // ENHANCED: Get staff member info from verification if available
+          let auditUserId = req.user.id || req.user.userId;
+          let auditUserEmail = req.user.email || req.user.userEmail;
+          
+          // Handle async operations without blocking the response
+          const processAuditLog = async () => {
+            // For member creation/renewal, try to get the verified staff member
+            if ((action === 'CREATE_MEMBER' || action === 'PROCESS_MEMBER_RENEWAL') && req.body?.staffId) {
+              try {
+                const { data: staffMember } = await supabase
+                  .from('branch_staff')
+                  .select('id, email, first_name, last_name')
+                  .eq('id', req.body.staffId)
+                  .single();
+                
+                if (staffMember) {
+                  auditUserId = staffMember.id;
+                  auditUserEmail = staffMember.email;
+                  console.log(`🔍 AUDIT: Using verified staff member: ${staffMember.first_name} ${staffMember.last_name} (${staffMember.email})`);
+                }
+              } catch (error) {
+                console.error('❌ AUDIT: Failed to get staff member info, using authenticated user');
+              }
+            }
+            
+            if (!auditUserId || !auditUserEmail) {
+              console.error(`❌ MISSING USER DATA - ID: ${auditUserId}, Email: ${auditUserEmail}`);
+              return;
+            }
+            
+            logAuditEvent({
+              userId: auditUserId,
+              userEmail: auditUserEmail,
+              action,
+              resourceType,
+              resourceId: req.params.id || req.body?.id || null,
+              branchId: req.params.branchId || req.body?.branchId || null,
+              ipAddress: req.ip || req.connection?.remoteAddress || null,
+              userAgent: req.get('User-Agent') || null,
+              timestamp: new Date().toISOString(),
+              success: true,
+              statusCode: res.statusCode,
+              requestData: {
+                method: req.method,
+                path: req.path,
+                params: req.params,
+                query: req.query,
+                body: await sanitizeRequestData(req.body, action), // Now properly async
+                headers: {
+                  'content-type': req.get('Content-Type'),
+                  'user-agent': req.get('User-Agent')
+                }
+              },
+              responseData: sanitizeResponseData(data, action)
+            });
+          };
+          
+          // Execute async audit logging without blocking response
+          processAuditLog().catch(error => {
+            console.error('💥 AUDIT LOG PROCESSING ERROR:', error);
+          });
+        } else {
+          if (!req.user) {
+            console.log(`⚠️ NO AUDIT LOG - Missing user object`);
+          }
+          if (res.statusCode >= 400) {
+            console.log(`⚠️ NO AUDIT LOG - Error status code: ${res.statusCode}`);
+          }
+        }
+        
+        // Call original json method immediately (synchronous)
+        return originalJson.call(this, data);
+      };
+      
+      next();
+      
+    } catch (error: any) {
+      console.error('💥 AUDIT MIDDLEWARE ERROR:', error);
+      next(); // Continue even if audit setup fails
+    }
+  };
 };
 
 // Export permission checking utilities for use in route handlers

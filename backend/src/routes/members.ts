@@ -114,6 +114,8 @@ router.post('/',
   auditLog('CREATE_MEMBER', 'member'),
   async (req: Request, res: Response) => {
     try {
+      console.log('🚨 MEMBER CREATION ROUTE CALLED');
+      console.log('🚨 REQUEST BODY:', JSON.stringify(req.body, null, 2));
       console.log('👥 Creating new member with PIN verification');
       
       const { 
