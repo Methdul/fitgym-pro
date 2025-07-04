@@ -43,7 +43,6 @@ interface AnalyticsData {
       change: number;
       changePercent: number;
     };
-    dailyAverage: number;
   };
   transactions: Array<{
     id: string;
@@ -440,10 +439,6 @@ const AnalyticsTab = ({ branchId, branchName }: AnalyticsTabProps) => {
                 <div class="metric-value">${analytics.memberAnalytics.active}</div>
             </div>
             <div class="metric-card">
-                <div class="metric-label">Daily Average</div>
-                <div class="metric-value">$${analytics.revenue.dailyAverage.toFixed(2)}</div>
-            </div>
-            <div class="metric-card">
                 <div class="metric-label">Retention Rate</div>
                 <div class="metric-value">${analytics.memberAnalytics.retentionRate}%</div>
             </div>
@@ -537,7 +532,6 @@ const AnalyticsTab = ({ branchId, branchName }: AnalyticsTabProps) => {
     csvRows.push(`Active Members,${analytics.memberAnalytics.active}`);
     csvRows.push(`Total Staff,${staff.length}`);
     csvRows.push(`Total Packages,${packages.length}`);
-    csvRows.push(`Daily Average Revenue,$${analytics.revenue.dailyAverage.toFixed(2)}`);
     csvRows.push(`Member Retention Rate,${analytics.memberAnalytics.retentionRate}%`);
     csvRows.push(``);
 
@@ -903,20 +897,6 @@ const AnalyticsTab = ({ branchId, branchName }: AnalyticsTabProps) => {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Daily Average</p>
-                <p className="text-2xl font-bold">{formatCurrency(analytics.revenue.dailyAverage)}</p>
-                <p className="text-xs text-muted-foreground">
-                  {analytics.timeAnalytics.totalDays} days
-                </p>
-              </div>
-              <Calendar className="h-8 w-8 text-purple-500" />
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Main Analytics Tabs - PHASE 4: UPDATED - Replaced Trends with Activity */}
