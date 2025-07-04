@@ -254,6 +254,7 @@ router.get('/branch/:branchId',
   [validateUUID('branchId'), handleValidationErrors],
   authenticate,
   requireBranchAccess(Permission.STAFF_READ),
+  auditLog('READ_STAFF', 'staff'), 
   auditLog('READ_BRANCH_STAFF', 'staff'),
   async (req: Request, res: Response) => {
     try {
@@ -530,6 +531,7 @@ router.post('/',
   authenticate,
   requirePermission(Permission.STAFF_WRITE),
   commonValidations.createStaff,
+  auditLog('CREATE_STAFF', 'staff'), 
   auditLog('CREATE_STAFF', 'staff'),
   async (req: Request, res: Response) => {
     try {

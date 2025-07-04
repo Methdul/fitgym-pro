@@ -1,4 +1,4 @@
-// backend/src/routes/analytics.ts - WITH SECURITY FIXES (Phase 1)
+// backend/src/routes/analytics.ts - WITH PHASE 3 AUDIT-BASED ANALYTICS
 import express, { Request, Response, NextFunction } from 'express';
 import { supabase } from '../lib/supabase';
 import { authenticate, optionalAuth } from '../middleware/auth';
@@ -133,7 +133,7 @@ const analyticsQueryValidation = [
   handleValidationErrors
 ];
 
-// Get comprehensive analytics for a branch - PHASE 1 SECURITY FIXES APPLIED
+// Get comprehensive analytics for a branch - PHASE 3: NOW USING AUDIT-BASED ANALYTICS
 router.get('/branch/:branchId', 
   strictRateLimit,                             // PHASE 1 FIX: Rate limiting for expensive queries
   commonValidations.validateBranchId,         // PHASE 1 FIX: UUID validation
@@ -181,22 +181,25 @@ router.get('/branch/:branchId',
       // PHASE 1 FIX: Apply result limits to prevent resource exhaustion
       const resultLimit = Math.min(parseInt(limit as string) || 10000, 50000);
 
-      // 1. Revenue Overview
-      const revenueData = await getRevenueOverview(branchId, start, end, resultLimit);
+      // PHASE 3: Use audit-based analytics queries
+      console.log('📊 Using audit-based analytics queries');
+
+      // 1. Revenue Overview (from audit logs)
+      const revenueData = await getAuditBasedRevenue(branchId, start, end, resultLimit);
       
-      // 2. Detailed Transactions
-      const transactions = await getDetailedTransactions(branchId, start, end, resultLimit);
+      // 2. Detailed Transactions (from audit logs)
+      const transactions = await getAuditBasedTransactions(branchId, start, end, resultLimit);
       
-      // 3. Member Analytics
-      const memberAnalytics = await getMemberAnalytics(branchId, start, end, resultLimit);
+      // 3. Member Analytics (from audit logs)
+      const memberAnalytics = await getAuditBasedMemberAnalytics(branchId, start, end, resultLimit);
       
-      // 4. Package Performance
+      // 4. Package Performance (keep existing for now - requires more complex audit analysis)
       const packagePerformance = await getPackagePerformance(branchId, start, end, resultLimit);
       
-      // 5. Staff Performance
-      const staffPerformance = await getStaffPerformance(branchId, start, end, resultLimit);
+      // 5. Staff Performance (from audit logs)
+      const staffPerformance = await getAuditBasedStaffPerformance(branchId, start, end, resultLimit);
       
-      // 6. Time-based Analytics
+      // 6. Time-based Analytics (keep existing for now)
       const timeAnalytics = await getTimeAnalytics(branchId, start, end, resultLimit);
 
       console.log(`✅ Found analytics data for branch ${branchId}`);
@@ -214,7 +217,8 @@ router.get('/branch/:branchId',
         },
         meta: {
           resultLimit,
-          queriedAt: new Date().toISOString()
+          queriedAt: new Date().toISOString(),
+          usingAuditLogs: true // PHASE 3: Indicate we're using audit-based data
         }
       });
     } catch (error) {
@@ -227,6 +231,331 @@ router.get('/branch/:branchId',
     }
   }
 );
+
+// PHASE 3: NEW - Get live activity feed from audit logs
+router.get('/branch/:branchId/activity',
+  strictRateLimit,
+  commonValidations.validateBranchId,
+  authenticate,
+  requireBranchAccess(Permission.ANALYTICS_READ),
+  auditLog('READ_ANALYTICS_ACTIVITY', 'analytics'),
+  async (req: Request, res: Response) => {
+    try {
+      const { branchId } = req.params;
+      const { limit = 50 } = req.query;
+      
+      console.log(`📊 Getting activity feed for branch: ${branchId}`);
+      
+      const activityLimit = Math.min(parseInt(limit as string) || 50, 100);
+      
+      // Get recent audit logs for activity feed
+      const { data: recentActivity, error } = await supabase
+        .from('audit_logs')
+        .select('*')
+        .eq('branch_id', branchId)
+        .not('action', 'like', '%READ%') // Exclude read operations for cleaner feed
+        .limit(activityLimit)
+        .order('timestamp', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching activity data:', error);
+        throw error;
+      }
+
+      // Transform audit logs into activity feed format
+      const activities = recentActivity?.map(log => ({
+        id: log.id,
+        timestamp: log.timestamp,
+        action: log.action,
+        resourceType: log.resource_type,
+        userEmail: log.user_email,
+        success: log.success,
+        description: generateActivityDescription(log),
+        details: {
+          statusCode: log.status_code,
+          resourceId: log.resource_id,
+          errorMessage: log.error_message
+        }
+      })) || [];
+
+      // Get activity statistics
+      const stats = {
+        totalActivities: activities.length,
+        successfulActivities: activities.filter(a => a.success).length,
+        failedActivities: activities.filter(a => !a.success).length,
+        uniqueUsers: new Set(activities.map(a => a.userEmail)).size,
+        lastActivity: activities[0]?.timestamp || null
+      };
+
+      res.json({
+        status: 'success',
+        data: {
+          activities,
+          stats,
+          period: {
+            generated: new Date().toISOString(),
+            limit: activityLimit
+          }
+        }
+      });
+      
+    } catch (error) {
+      console.error('Error fetching activity feed:', error);
+      res.status(500).json({
+        status: 'error',
+        error: 'Failed to fetch activity feed',
+        message: 'An error occurred while fetching activity data'
+      });
+    }
+  }
+);
+
+// ====================================================================
+// PHASE 3: NEW AUDIT-BASED ANALYTICS FUNCTIONS
+// ====================================================================
+
+// NEW: Get revenue from audit logs instead of direct table queries
+async function getAuditBasedRevenue(branchId: string, start: Date, end: Date, limit: number): Promise<RevenueData> {
+  console.log('📊 Getting audit-based revenue data');
+  
+  // Get financial transactions from audit logs
+  const { data: auditLogs, error } = await supabase
+    .from('audit_logs')
+    .select('*')
+    .eq('branch_id', branchId)
+    .in('action', ['CREATE_MEMBER', 'PROCESS_MEMBER_RENEWAL'])
+    .eq('success', true)
+    .gte('timestamp', start.toISOString())
+    .lt('timestamp', end.toISOString())
+    .limit(limit)
+    .order('timestamp', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching audit revenue data:', error);
+    throw error;
+  }
+
+  console.log(`📊 Found ${auditLogs?.length || 0} financial audit logs`);
+
+  // Extract financial data from request_data JSONB
+  let totalRevenue = 0;
+  let renewalRevenue = 0;
+  let newMemberRevenue = 0;
+  let upgrades = 0;
+
+  auditLogs?.forEach(log => {
+    const requestData = log.request_data || {};
+    const amount = parseFloat(requestData.package_price || requestData.amount_paid || 0);
+    
+    if (amount > 0) {
+      totalRevenue += amount;
+      
+      if (log.action === 'PROCESS_MEMBER_RENEWAL') {
+        renewalRevenue += amount;
+      } else if (log.action === 'CREATE_MEMBER') {
+        newMemberRevenue += amount;
+      }
+    }
+  });
+
+  // Calculate comparison with previous period (simplified for now)
+  const periodLength = end.getTime() - start.getTime();
+  const previousStart = new Date(start.getTime() - periodLength);
+  const previousEnd = new Date(start.getTime());
+
+  const { data: previousLogs } = await supabase
+    .from('audit_logs')
+    .select('request_data')
+    .eq('branch_id', branchId)
+    .in('action', ['CREATE_MEMBER', 'PROCESS_MEMBER_RENEWAL'])
+    .eq('success', true)
+    .gte('timestamp', previousStart.toISOString())
+    .lt('timestamp', previousEnd.toISOString())
+    .limit(limit);
+
+  const previousRevenue = previousLogs?.reduce((sum, log) => {
+    const amount = parseFloat(log.request_data?.package_price || log.request_data?.amount_paid || 0);
+    return sum + amount;
+  }, 0) || 0;
+
+  const change = totalRevenue - previousRevenue;
+  const changePercent = previousRevenue > 0 ? (change / previousRevenue) * 100 : 0;
+
+  // Calculate daily average
+  const days = Math.ceil(periodLength / (1000 * 60 * 60 * 24));
+  const dailyAverage = days > 0 ? totalRevenue / days : 0;
+
+  return {
+    total: totalRevenue,
+    renewals: renewalRevenue,
+    newMemberships: newMemberRevenue,
+    upgrades: upgrades,
+    comparison: {
+      previous: previousRevenue,
+      change: change,
+      changePercent: changePercent
+    },
+    dailyAverage: dailyAverage
+  };
+}
+
+// NEW: Get detailed transactions from audit logs
+async function getAuditBasedTransactions(branchId: string, start: Date, end: Date, limit: number): Promise<Transaction[]> {
+  console.log('📊 Getting audit-based transactions');
+  
+  const { data: auditLogs, error } = await supabase
+    .from('audit_logs')
+    .select('*')
+    .eq('branch_id', branchId)
+    .in('action', ['CREATE_MEMBER', 'PROCESS_MEMBER_RENEWAL'])
+    .eq('success', true)
+    .gte('timestamp', start.toISOString())
+    .lt('timestamp', end.toISOString())
+    .limit(limit)
+    .order('timestamp', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching audit transaction data:', error);
+    throw error;
+  }
+
+  // Transform audit logs into transaction format
+  const transactions: Transaction[] = auditLogs?.map(log => {
+    const requestData = log.request_data || {};
+    const responseData = log.response_data || {};
+    
+    return {
+      id: log.id,
+      date: log.timestamp,
+      memberName: responseData.member_name || 'Unknown Member',
+      type: log.action === 'CREATE_MEMBER' ? 'New Membership' : 'Renewal',
+      packageName: requestData.package_name || 'Unknown Package',
+      amount: parseFloat(requestData.package_price || requestData.amount_paid || 0),
+      paymentMethod: requestData.payment_method || 'Unknown',
+      processedBy: log.user_email || 'Unknown Staff',
+      memberStatus: responseData.success ? 'Active' : 'Pending'
+    };
+  }) || [];
+
+  return transactions;
+}
+
+// NEW: Get member analytics from audit logs
+async function getAuditBasedMemberAnalytics(branchId: string, start: Date, end: Date, limit: number): Promise<MemberAnalytics> {
+  console.log('📊 Getting audit-based member analytics');
+  
+  // Get member-related audit logs
+  const { data: memberLogs, error } = await supabase
+    .from('audit_logs')
+    .select('*')
+    .eq('branch_id', branchId)
+    .in('action', ['CREATE_MEMBER', 'UPDATE_MEMBER', 'DELETE_MEMBER', 'PROCESS_MEMBER_RENEWAL'])
+    .eq('success', true)
+    .gte('timestamp', start.toISOString())
+    .lt('timestamp', end.toISOString())
+    .limit(limit)
+    .order('timestamp', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching audit member data:', error);
+    throw error;
+  }
+
+  // Analyze member activities
+  const newMembers = memberLogs?.filter(log => log.action === 'CREATE_MEMBER').length || 0;
+  const renewals = memberLogs?.filter(log => log.action === 'PROCESS_MEMBER_RENEWAL').length || 0;
+  
+  // Get package distribution from audit logs
+  const packageTypes: { [key: string]: number } = {};
+  memberLogs?.forEach(log => {
+    const packageType = log.request_data?.member_type || log.request_data?.package_type || 'unknown';
+    packageTypes[packageType] = (packageTypes[packageType] || 0) + 1;
+  });
+
+  const totalMemberActivities = memberLogs?.length || 0;
+  const packageDistribution = Object.entries(packageTypes).map(([type, count]) => ({
+    type,
+    count,
+    percentage: totalMemberActivities > 0 ? (count / totalMemberActivities) * 100 : 0
+  }));
+
+  // For now, use simplified calculations (in a full implementation, you'd need current member counts)
+  return {
+    total: newMembers + renewals, // Simplified
+    active: newMembers + renewals, // Simplified
+    expired: 0, // Would need more complex logic
+    newThisPeriod: newMembers,
+    renewalsThisPeriod: renewals,
+    retentionRate: renewals > 0 && newMembers > 0 ? (renewals / (newMembers + renewals)) * 100 : 0,
+    packageDistribution
+  };
+}
+
+// NEW: Get staff performance from audit logs
+async function getAuditBasedStaffPerformance(branchId: string, start: Date, end: Date, limit: number): Promise<StaffPerformance[]> {
+  console.log('📊 Getting audit-based staff performance');
+  
+  const { data: auditLogs, error } = await supabase
+    .from('audit_logs')
+    .select('*')
+    .eq('branch_id', branchId)
+    .in('action', ['CREATE_MEMBER', 'PROCESS_MEMBER_RENEWAL'])
+    .eq('success', true)
+    .gte('timestamp', start.toISOString())
+    .lt('timestamp', end.toISOString())
+    .limit(limit)
+    .order('timestamp', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching audit staff data:', error);
+    throw error;
+  }
+
+  // Group by staff member
+  const staffStats: { [email: string]: any } = {};
+  
+  auditLogs?.forEach(log => {
+    const staffEmail = log.user_email;
+    if (!staffEmail) return;
+    
+    if (!staffStats[staffEmail]) {
+      staffStats[staffEmail] = {
+        email: staffEmail,
+        newMembers: 0,
+        renewals: 0,
+        revenue: 0,
+        totalTransactions: 0
+      };
+    }
+    
+    const amount = parseFloat(log.request_data?.package_price || log.request_data?.amount_paid || 0);
+    staffStats[staffEmail].revenue += amount;
+    staffStats[staffEmail].totalTransactions += 1;
+    
+    if (log.action === 'CREATE_MEMBER') {
+      staffStats[staffEmail].newMembers += 1;
+    } else if (log.action === 'PROCESS_MEMBER_RENEWAL') {
+      staffStats[staffEmail].renewals += 1;
+    }
+  });
+
+  // Convert to array format
+  const performance: StaffPerformance[] = Object.values(staffStats).map((stats: any) => ({
+    id: stats.email, // Using email as ID since we don't have staff ID in audit logs
+    name: stats.email.split('@')[0], // Extract name from email
+    role: 'Staff', // Simplified - would need staff lookup for actual role
+    newMembers: stats.newMembers,
+    renewals: stats.renewals,
+    totalTransactions: stats.totalTransactions,
+    revenue: stats.revenue
+  }));
+
+  return performance.sort((a, b) => b.revenue - a.revenue);
+}
+
+// ====================================================================
+// EXISTING HELPER FUNCTIONS (KEPT FOR FALLBACK/PACKAGE PERFORMANCE)
+// ====================================================================
 
 // Helper function: Revenue Overview - PHASE 1 FIX: Added result limits
 async function getRevenueOverview(branchId: string, start: Date, end: Date, limit: number): Promise<RevenueData> {
@@ -321,12 +650,12 @@ async function getDetailedTransactions(branchId: string, start: Date, end: Date,
       *,
       members!inner(branch_id, first_name, last_name, status),
       packages(name),
-      branch_staff!processed_by_staff_id(first_name, last_name)
+      branch_staff!renewed_by_staff_id(first_name, last_name)
     `)
     .eq('members.branch_id', branchId)
     .gte('created_at', start.toISOString())
     .lt('created_at', end.toISOString())
-    .limit(1000)
+    .limit(Math.floor(limit / 2))
     .order('created_at', { ascending: false });
 
   // Add renewal transactions
@@ -348,7 +677,10 @@ async function getDetailedTransactions(branchId: string, start: Date, end: Date,
   // Get new memberships (with limit)
   const { data: newMembers } = await supabase
     .from('members')
-    .select('*')
+    .select(`
+      *,
+      branch_staff!processed_by_staff_id(first_name, last_name)
+    `)
     .eq('branch_id', branchId)
     .gte('created_at', start.toISOString())
     .lt('created_at', end.toISOString())
@@ -604,6 +936,37 @@ function getPackageDistribution(members: any[]): Array<{ type: string; count: nu
   }));
 }
 
-console.log('📊 Analytics routes loaded successfully - WITH PHASE 1 SECURITY FIXES');
+// PHASE 3: Helper function to generate human-readable activity descriptions
+function generateActivityDescription(log: any): string {
+  const user = log.user_email?.split('@')[0] || 'Unknown user';
+  const requestData = log.request_data || {};
+  
+  switch (log.action) {
+    case 'CREATE_MEMBER':
+      return `${user} created a new member (${requestData.package_name || 'package'})`;
+    case 'PROCESS_MEMBER_RENEWAL':
+      return `${user} processed a membership renewal (${requestData.payment_method || 'payment'})`;
+    case 'UPDATE_MEMBER':
+      return `${user} updated member information`;
+    case 'DELETE_MEMBER':
+      return `${user} deleted a member`;
+    case 'CREATE_STAFF':
+      return `${user} added a new staff member`;
+    case 'UPDATE_STAFF':
+      return `${user} updated staff information`;
+    case 'DELETE_STAFF':
+      return `${user} removed a staff member`;
+    case 'CREATE_PACKAGE':
+      return `${user} created a new package`;
+    case 'UPDATE_PACKAGE':
+      return `${user} updated package information`;
+    case 'DELETE_PACKAGE':
+      return `${user} deleted a package`;
+    default:
+      return `${user} performed ${log.action} on ${log.resource_type}`;
+  }
+}
+
+console.log('📊 Analytics routes loaded successfully - WITH PHASE 3 AUDIT-BASED SYSTEM');
 
 export { router as analyticsRoutes };

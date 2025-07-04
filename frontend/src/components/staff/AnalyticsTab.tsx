@@ -20,7 +20,13 @@ import {
   PieChart,
   Activity,
   FileText,
-  CalendarDays
+  CalendarDays,
+  CheckCircle,
+  XCircle,
+  Clock,
+  AlertTriangle,
+  Zap,
+  Eye
 } from 'lucide-react';
 import { db, getAuthHeaders } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
@@ -99,6 +105,35 @@ interface AnalyticsData {
   };
 }
 
+// PHASE 4: NEW - Activity Data Interface
+interface ActivityData {
+  activities: Array<{
+    id: string;
+    timestamp: string;
+    action: string;
+    resourceType: string;
+    userEmail: string;
+    success: boolean;
+    description: string;
+    details: {
+      statusCode: number;
+      resourceId: string;
+      errorMessage?: string;
+    };
+  }>;
+  stats: {
+    totalActivities: number;
+    successfulActivities: number;
+    failedActivities: number;
+    uniqueUsers: number;
+    lastActivity: string | null;
+  };
+  period: {
+    generated: string;
+    limit: number;
+  };
+}
+
 interface AnalyticsTabProps {
   branchId: string;
   branchName: string;
@@ -106,7 +141,9 @@ interface AnalyticsTabProps {
 
 const AnalyticsTab = ({ branchId, branchName }: AnalyticsTabProps) => {
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
+  const [activityData, setActivityData] = useState<ActivityData | null>(null); // PHASE 4: NEW
   const [loading, setLoading] = useState(true);
+  const [activityLoading, setActivityLoading] = useState(false); // PHASE 4: NEW
   const [dateRange, setDateRange] = useState('month');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
@@ -117,6 +154,39 @@ const AnalyticsTab = ({ branchId, branchName }: AnalyticsTabProps) => {
   useEffect(() => {
     fetchAnalytics();
   }, [branchId, dateRange, customStartDate, customEndDate]);
+
+  // PHASE 4: NEW - Fetch activity data when Activity tab is active
+  const fetchActivityData = async () => {
+    if (!branchId) return;
+    
+    setActivityLoading(true);
+    try {
+      console.log('🔄 Fetching activity data for branch:', branchId);
+      
+      const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+      const response = await fetch(`${API_BASE_URL}/analytics/branch/${branchId}/activity?limit=50`, {
+        headers: getAuthHeaders(),
+      });
+      
+      const result = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to fetch activity data');
+      }
+      
+      console.log('✅ Activity data loaded:', result.data);
+      setActivityData(result.data);
+    } catch (error) {
+      console.error('Error fetching activity data:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load activity data",
+        variant: "destructive",
+      });
+    } finally {
+      setActivityLoading(false);
+    }
+  };
 
   const fetchAnalytics = async () => {
     setLoading(true);
@@ -849,14 +919,14 @@ const AnalyticsTab = ({ branchId, branchName }: AnalyticsTabProps) => {
         </Card>
       </div>
 
-      {/* Main Analytics Tabs */}
+      {/* Main Analytics Tabs - PHASE 4: UPDATED - Replaced Trends with Activity */}
       <Tabs defaultValue="transactions" className="space-y-6">
         <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="transactions">Transactions</TabsTrigger>
           <TabsTrigger value="members">Members</TabsTrigger>
           <TabsTrigger value="packages">Packages</TabsTrigger>
           <TabsTrigger value="staff">Staff</TabsTrigger>
-          <TabsTrigger value="trends">Trends</TabsTrigger>
+          <TabsTrigger value="activity" onClick={fetchActivityData}>Activity</TabsTrigger>
         </TabsList>
 
         {/* Transactions Tab */}
@@ -1041,59 +1111,186 @@ const AnalyticsTab = ({ branchId, branchName }: AnalyticsTabProps) => {
           </Card>
         </TabsContent>
 
-        {/* Trends Tab */}
-        <TabsContent value="trends">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* PHASE 4: NEW - Activity Tab (Replaces Trends) */}
+        <TabsContent value="activity">
+          <div className="space-y-6">
+            {/* Activity Stats Cards */}
+            {activityData && (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Total Activities</p>
+                        <p className="text-2xl font-bold">{activityData.stats.totalActivities}</p>
+                      </div>
+                      <Activity className="h-8 w-8 text-blue-500" />
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Successful</p>
+                        <p className="text-2xl font-bold text-green-600">{activityData.stats.successfulActivities}</p>
+                      </div>
+                      <CheckCircle className="h-8 w-8 text-green-500" />
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Failed</p>
+                        <p className="text-2xl font-bold text-red-600">{activityData.stats.failedActivities}</p>
+                      </div>
+                      <XCircle className="h-8 w-8 text-red-500" />
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Active Users</p>
+                        <p className="text-2xl font-bold">{activityData.stats.uniqueUsers}</p>
+                      </div>
+                      <Users className="h-8 w-8 text-purple-500" />
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            {/* Live Activity Feed */}
             <Card>
-              <CardHeader>
-                <CardTitle>Daily Revenue Trend</CardTitle>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle className="flex items-center gap-2">
+                  <Activity className="h-5 w-5" />
+                  Live Activity Feed
+                </CardTitle>
+                <Button 
+                  onClick={fetchActivityData} 
+                  variant="outline" 
+                  size="sm"
+                  disabled={activityLoading}
+                >
+                  <RefreshCw className={`h-4 w-4 mr-2 ${activityLoading ? 'animate-spin' : ''}`} />
+                  {activityLoading ? 'Loading...' : 'Refresh'}
+                </Button>
               </CardHeader>
               <CardContent>
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {analytics.timeAnalytics.daily.map((day) => (
-                    <div key={day.date} className="flex items-center justify-between p-2 border rounded">
-                      <span>{new Date(day.date).toLocaleDateString()}</span>
-                      <div className="text-right">
-                        <div className="font-bold text-green-600">{formatCurrency(day.revenue)}</div>
-                        <div className="text-xs text-muted-foreground">{day.transactions} transactions</div>
+                {activityLoading ? (
+                  <div className="space-y-4">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <div key={i} className="flex items-center space-x-4 animate-pulse">
+                        <div className="w-10 h-10 bg-muted rounded-full" />
+                        <div className="flex-1 space-y-2">
+                          <div className="h-4 bg-muted rounded w-3/4" />
+                          <div className="h-3 bg-muted rounded w-1/2" />
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                ) : activityData && activityData.activities.length > 0 ? (
+                  <div className="space-y-4 max-h-96 overflow-y-auto">
+                    {activityData.activities.map((activity) => (
+                      <div key={activity.id} className="flex items-start space-x-4 p-3 rounded-lg border">
+                        <div className={`w-3 h-3 rounded-full mt-2 ${activity.success ? 'bg-green-500' : 'bg-red-500'}`} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm font-medium truncate">{activity.description}</p>
+                            <span className="text-xs text-muted-foreground whitespace-nowrap ml-2">
+                              {new Date(activity.timestamp).toLocaleTimeString()}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <Badge variant="outline" className="text-xs">
+                              {activity.action}
+                            </Badge>
+                            <Badge variant="outline" className="text-xs capitalize">
+                              {activity.resourceType}
+                            </Badge>
+                            <span className="text-xs text-muted-foreground">
+                              by {activity.userEmail.split('@')[0]}
+                            </span>
+                          </div>
+                          {!activity.success && activity.details.errorMessage && (
+                            <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                              <AlertTriangle className="h-3 w-3" />
+                              {activity.details.errorMessage}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <Activity className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                    <h3 className="text-lg font-medium mb-2">No Recent Activity</h3>
+                    <p className="text-muted-foreground">Activity will appear here as staff perform actions</p>
+                    <Button onClick={fetchActivityData} className="mt-4" variant="outline">
+                      <Zap className="h-4 w-4 mr-2" />
+                      Check for Activity
+                    </Button>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Performance Highlights</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="p-3 border rounded bg-green-50">
-                  <div className="font-medium text-green-800">Peak Day</div>
-                  <div className="text-sm text-green-600">
-                    {new Date(analytics.timeAnalytics.peakDay.date).toLocaleDateString()}: {formatCurrency(analytics.timeAnalytics.peakDay.revenue)}
+            {/* System Health Indicators */}
+            {activityData && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Zap className="h-5 w-5" />
+                    System Health
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
+                      <div>
+                        <p className="text-sm text-green-700">Success Rate</p>
+                        <p className="text-lg font-bold text-green-800">
+                          {activityData.stats.totalActivities > 0 
+                            ? ((activityData.stats.successfulActivities / activityData.stats.totalActivities) * 100).toFixed(1)
+                            : 0}%
+                        </p>
+                      </div>
+                      <CheckCircle className="h-8 w-8 text-green-600" />
+                    </div>
+
+                    <div className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
+                      <div>
+                        <p className="text-sm text-blue-700">Active Users</p>
+                        <p className="text-lg font-bold text-blue-800">{activityData.stats.uniqueUsers}</p>
+                      </div>
+                      <Users className="h-8 w-8 text-blue-600" />
+                    </div>
+
+                    <div className="flex items-center justify-between p-3 bg-purple-50 rounded-lg">
+                      <div>
+                        <p className="text-sm text-purple-700">Last Activity</p>
+                        <p className="text-sm font-medium text-purple-800">
+                          {activityData.stats.lastActivity 
+                            ? new Date(activityData.stats.lastActivity).toLocaleString()
+                            : 'No recent activity'
+                          }
+                        </p>
+                      </div>
+                      <Clock className="h-8 w-8 text-purple-600" />
+                    </div>
                   </div>
-                </div>
-                <div className="p-3 border rounded bg-blue-50">
-                  <div className="font-medium text-blue-800">Daily Average</div>
-                  <div className="text-sm text-blue-600">
-                    {formatCurrency(analytics.timeAnalytics.averageDaily)} per day
-                  </div>
-                </div>
-                <div className="p-3 border rounded bg-purple-50">
-                  <div className="font-medium text-purple-800">Top Package</div>
-                  <div className="text-sm text-purple-600">
-                    {analytics.packagePerformance[0]?.name}: {formatCurrency(analytics.packagePerformance[0]?.revenue || 0)}
-                  </div>
-                </div>
-                <div className="p-3 border rounded bg-orange-50">
-                  <div className="font-medium text-orange-800">Top Staff</div>
-                  <div className="text-sm text-orange-600">
-                    {analytics.staffPerformance[0]?.name}: {formatCurrency(analytics.staffPerformance[0]?.revenue || 0)}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            )}
           </div>
         </TabsContent>
       </Tabs>

@@ -339,28 +339,68 @@ export const getUserRoleInfo = async (req: Request, res: Response) => {
 };
 
 // Audit logging for sensitive operations
+// Audit logging for sensitive operations - FIXED VERSION
 export const auditLog = (action: string, resourceType: string) => {
   return async (req: Request, res: Response, next: NextFunction) => {
     try {
+      console.log(`🔍 AUDIT MIDDLEWARE: ${action} - ${resourceType}`);
+      console.log(`🔍 USER OBJECT:`, req.user);
+      console.log(`🔍 REQUEST METHOD:`, req.method);
+      console.log(`🔍 REQUEST PATH:`, req.path);
+      
       // Store original res.json to intercept response
       const originalJson = res.json;
       
       res.json = function(data: any) {
+        console.log(`🔍 RESPONSE STATUS:`, res.statusCode);
+        console.log(`🔍 USER EXISTS:`, !!req.user);
+        console.log(`🔍 STATUS < 400:`, res.statusCode < 400);
+        
         // Log the action after successful response
         if (req.user && res.statusCode < 400) {
+          console.log(`📋 CREATING AUDIT LOG FOR:`, action);
+          
+          // Ensure we have the required fields
+          const userId = req.user.id || req.user.userId;
+          const userEmail = req.user.email || req.user.userEmail;
+          
+          if (!userId || !userEmail) {
+            console.error(`❌ MISSING USER DATA - ID: ${userId}, Email: ${userEmail}`);
+            return originalJson.call(this, data);
+          }
+          
           logAuditEvent({
-            userId: req.user.id,
-            userEmail: req.user.email,
+            userId: userId,
+            userEmail: userEmail,
             action,
             resourceType,
-            resourceId: req.params.id || req.body.id,
-            branchId: req.params.branchId || req.body.branchId,
-            ipAddress: req.ip,
-            userAgent: req.get('User-Agent'),
+            resourceId: req.params.id || req.body?.id || null,
+            branchId: req.params.branchId || req.body?.branchId || null,
+            ipAddress: req.ip || req.connection?.remoteAddress || null,
+            userAgent: req.get('User-Agent') || null,
             timestamp: new Date().toISOString(),
             success: true,
-            statusCode: res.statusCode
+            statusCode: res.statusCode,
+            requestData: {
+              method: req.method,
+              path: req.path,
+              params: req.params,
+              query: req.query,
+              body: sanitizeRequestData(req.body, action),
+              headers: {
+                'content-type': req.get('Content-Type'),
+                'user-agent': req.get('User-Agent')
+              }
+            },
+            responseData: sanitizeResponseData(data, action)
           });
+        } else {
+          if (!req.user) {
+            console.log(`⚠️ NO AUDIT LOG - Missing user object`);
+          }
+          if (res.statusCode >= 400) {
+            console.log(`⚠️ NO AUDIT LOG - Error status code: ${res.statusCode}`);
+          }
         }
         
         // Call original json method
@@ -369,32 +409,145 @@ export const auditLog = (action: string, resourceType: string) => {
       
       next();
       
-    } catch (error) {
-      console.error('Audit logging error:', error);
-      next(); // Continue even if audit logging fails
+    } catch (error: any) {
+      console.error('💥 AUDIT MIDDLEWARE ERROR:', error);
+      next(); // Continue even if audit setup fails
     }
   };
 };
 
+
+// Sanitize request data to capture financial information safely
+const sanitizeRequestData = (body: any, action: string) => {
+  if (!body) return null;
+  
+  // For financial operations, capture key financial data
+  if (action === 'CREATE_MEMBER' || action === 'PROCESS_MEMBER_RENEWAL') {
+    return {
+      // Financial data for analytics
+      package_price: body.package_price || body.packagePrice || body.amountPaid,
+      payment_method: body.payment_method || body.paymentMethod,
+      package_name: body.package_name || body.packageName,
+      package_id: body.package_id || body.packageId,
+      duration_months: body.duration_months || body.durationMonths,
+      
+      // Member data (non-sensitive)
+      member_type: body.package_type || body.packageType,
+      branch_id: body.branch_id || body.branchId,
+      
+      // Staff data
+      staff_id: body.staff_id || body.staffId,
+      processed_by: body.processed_by_staff_id || body.processedByStaffId
+    };
+  }
+  
+  // For other operations, capture basic data
+  return {
+    operation_type: action,
+    resource_count: Array.isArray(body) ? body.length : 1,
+    has_sensitive_data: !!(body.pin || body.password || body.national_id),
+    data_keys: Object.keys(body || {}).filter(key => 
+      !['pin', 'password', 'national_id', 'pin_hash'].includes(key)
+    )
+  };
+};
+
+// Sanitize response data to capture success metrics
+const sanitizeResponseData = (responseData: any, action: string) => {
+  if (!responseData) return null;
+  
+  // Extract useful response information
+  const response = {
+    status: responseData.status,
+    success: responseData.status === 'success',
+    timestamp: new Date().toISOString()
+  };
+  
+  // For financial operations, capture result data
+  if (action === 'CREATE_MEMBER' || action === 'PROCESS_MEMBER_RENEWAL') {
+    return {
+      ...response,
+      // Success metrics
+      member_id: responseData.data?.id || responseData.data?.member?.id,
+      renewal_id: responseData.data?.renewal?.id,
+      transaction_successful: responseData.status === 'success',
+      
+      // Financial confirmation
+      amount_processed: responseData.data?.amount_paid || responseData.data?.package_price,
+      new_expiry_date: responseData.data?.member?.expiry_date || responseData.data?.new_expiry,
+      
+      // Avoid sensitive data
+      message: responseData.message
+    };
+  }
+  
+  // For other operations
+  return {
+    ...response,
+    record_count: responseData.data ? (Array.isArray(responseData.data) ? responseData.data.length : 1) : 0,
+    has_data: !!responseData.data,
+    message: responseData.message
+  };
+};
 // Function to log audit events
+// Function to log audit events - FIXED VERSION
 const logAuditEvent = async (auditData: any) => {
   try {
-    // In a production system, you'd want to:
-    // 1. Store in a separate audit database
-    // 2. Use a message queue for async processing
-    // 3. Consider data retention policies
+    console.log('📋 AUDIT LOG ATTEMPT:', JSON.stringify(auditData, null, 2));
     
-    console.log('📋 AUDIT LOG:', JSON.stringify(auditData, null, 2));
+    // Ensure required fields are present
+    if (!auditData.userId || !auditData.userEmail) {
+      console.error('❌ AUDIT LOG SKIPPED: Missing required user_id or user_email');
+      return;
+    }
     
-    // Optional: Store in database
-    await supabase
+    // Map JavaScript camelCase to database snake_case
+    const dbAuditData = {
+      user_id: auditData.userId,
+      user_email: auditData.userEmail,
+      action: auditData.action,
+      resource_type: auditData.resourceType,
+      resource_id: auditData.resourceId || null,
+      branch_id: auditData.branchId || null,
+      ip_address: auditData.ipAddress || null,
+      user_agent: auditData.userAgent || null,
+      timestamp: auditData.timestamp || new Date().toISOString(),
+      success: auditData.success !== undefined ? auditData.success : true,
+      status_code: auditData.statusCode || null,
+      error_message: auditData.errorMessage || null,
+      request_data: auditData.requestData || null,
+      response_data: auditData.responseData || null
+    };
+    
+    console.log('📋 MAPPED DB DATA:', JSON.stringify(dbAuditData, null, 2));
+    
+    const { data, error } = await supabase
       .from('audit_logs')
-      .insert(auditData)
+      .insert(dbAuditData)
       .select()
       .single();
       
-  } catch (error) {
-    console.error('Failed to store audit log:', error);
+    if (error) {
+      console.error('❌ AUDIT LOG INSERT ERROR:', error);
+      console.error('Error details:', {
+        message: error?.message || 'Unknown error',
+        code: error?.code || 'NO_CODE', 
+        details: error?.details || 'No details',
+        hint: error?.hint || 'No hint'
+      });
+      return;
+    }
+    
+    console.log('✅ AUDIT LOG SAVED SUCCESSFULLY:', data);
+      
+  } catch (error: any) {
+    console.error('💥 AUDIT LOG FAILED:', error);
+    console.error('Error details:', {
+      message: error?.message || 'Unknown error',
+      code: error?.code || 'NO_CODE',
+      details: error?.details || 'No details',
+      hint: error?.hint || 'No hint'
+    });
     // Don't throw - audit logging failure shouldn't break the request
   }
 };

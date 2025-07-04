@@ -261,7 +261,7 @@ const StaffDashboard = () => {
     try {
       const [branchData, membersData, staffData, packagesData] = await Promise.all([
         db.branches.getById(branchId),
-        db.members.getByBranch(branchId),
+        db.members.getByBranch(branchId),  // ✅ Now TypeScript accepts this
         db.staff.getByBranch(branchId),
         fetchBranchPackages(branchId)
       ]);
@@ -1234,14 +1234,14 @@ const StaffDashboard = () => {
                             <td className="p-3">
                               <div>
                                 <p className="font-medium">{member.first_name} {member.last_name}</p>
-                                <p className="text-sm text-muted-foreground">
+                                <div className="text-sm text-muted-foreground">
                                   {member.is_verified && (
                                     <Badge variant="secondary" className="text-xs mr-1">
                                       Verified
                                     </Badge>
                                   )}
                                   ID: {member.national_id}
-                                </p>
+                                </div>
                               </div>
                             </td>
                             <td className="p-3">

@@ -276,20 +276,18 @@ export const db = {
     getByBranch: async (branchId: string) => {
       try {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
-        console.log('🔍 Using API URL for staff:', API_BASE_URL);
-        
         const response = await fetch(`${API_BASE_URL}/staff/branch/${branchId}`, {
           headers: getAuthHeaders(),
         });
         const result = await response.json();
         
         if (!response.ok) {
-          throw new Error(result.error || 'Failed to fetch staff');
+          throw new Error(result.error || 'Failed to fetch members');
         }
         
         return { data: result.data, error: null };
       } catch (error) {
-        console.error('Error fetching staff:', error);
+        console.error('Error fetching members:', error);
         return { data: null, error: error instanceof Error ? error : new Error('Unknown error') };
       }
     },
@@ -449,7 +447,7 @@ export const db = {
     getByBranch: async (branchId: string) => {
       try {
         const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
-        const response = await fetch(`${API_BASE_URL}/members/branch/${branchId}`, {
+        const response = await fetch(`${API_BASE_URL}/members/branch/${branchId}?limit=1000`, {
           headers: getAuthHeaders(),
         });
         const result = await response.json();

@@ -28,6 +28,7 @@ router.get('/branch/:branchId',
   authRateLimit,
   authenticate,
   requirePermission(Permission.MEMBERS_READ),
+  auditLog('READ_MEMBERS', 'member'),
   async (req: Request, res: Response) => {
     try {
       const { branchId } = req.params;
@@ -523,12 +524,15 @@ router.delete('/:id',
   authRateLimit,
   authenticate,
   requirePermission(Permission.MEMBERS_DELETE),
+  [validateUUID('id'), handleValidationErrors],
   auditLog('DELETE_MEMBER', 'member'),
   async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
       
-      // Get existing member to verify ownership/access
+      console.log(`🗑️ Deleting member: ${id}`);
+      
+      // Get existing member to verify ownership/access and for audit trail
       const { data: existingMember, error: fetchError } = await supabase
         .from('members')
         .select('id, branch_id, email, first_name, last_name')
@@ -554,14 +558,14 @@ router.delete('/:id',
         }
       }
       
-      // Delete member record
-      const { error: deleteError } = await supabase
+      // Delete member
+      const { error } = await supabase
         .from('members')
         .delete()
         .eq('id', id);
       
-      if (deleteError) {
-        console.error('Database error deleting member:', deleteError);
+      if (error) {
+        console.error('Database error deleting member:', error);
         throw new Error('Failed to delete member');
       }
       
@@ -569,7 +573,12 @@ router.delete('/:id',
       
       res.json({
         status: 'success',
-        message: 'Member deleted successfully'
+        message: 'Member deleted successfully',
+        data: {
+          id: existingMember.id,
+          name: `${existingMember.first_name} ${existingMember.last_name}`,
+          email: existingMember.email
+        }
       });
       
     } catch (error) {
