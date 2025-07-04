@@ -486,89 +486,125 @@ router.post('/process',
         });
       }
 
-      // ✅ Step 6: Create renewal record - FIXED TO MATCH YOUR TABLE SCHEMA
-      console.log('🔍 Creating renewal record with corrected schema...');
-      console.log('Member expiry date:', member.expiry_date);
-      console.log('New expiry date calculation:', newExpiryDate.toISOString());
-      
-      const renewalData = {
-        member_id: memberId,
-        package_id: packageId,
-        renewed_by_staff_id: staffId,
-        payment_method: paymentMethod, // Now only 'cash' or 'card'
-        amount_paid: parseFloat(amountPaid),
-        // ✅ FIXED: Use correct column names and date format (not timestamp)
-        previous_expiry: member.expiry_date, // Keep as-is if already date format
-        new_expiry: newExpiryDate.toISOString().split('T')[0] // Convert to YYYY-MM-DD
-        // ✅ REMOVED: duration_months and additional_members (columns don't exist in your table)
-        // created_at will use table default (NOW())
-      };
+      // ✅ Step 6: Process ALL members (primary + additional)
+      console.log('🔍 Processing renewal for all members...');
 
-      console.log('🔍 Renewal data to insert:', JSON.stringify(renewalData, null, 2));
+      // Get all member IDs to process (primary + additional)
+      const allMemberIds = [memberId, ...(additionalMembers || [])];
+      console.log(`📝 Processing ${allMemberIds.length} members:`, allMemberIds);
 
-      const { data: renewal, error: renewalError } = await supabase
-        .from('member_renewals')
-        .insert(renewalData)
-        .select()
-        .single();
-
-      if (renewalError) {
-        console.error('🚨 RENEWAL INSERT ERROR:');
-        console.error('Code:', renewalError.code);
-        console.error('Message:', renewalError.message);
-        console.error('Details:', renewalError.details);
-        console.error('Hint:', renewalError.hint);
-        
-        return res.status(500).json({
-          status: 'error',
-          error: 'Failed to create renewal record',
-          details: renewalError.message,
-          debug: {
-            code: renewalError.code,
-            insertData: renewalData
-          }
-        });
-      }
-
-      console.log('✅ Renewal record created successfully:', renewal.id);
-
-      // ✅ Step 7: Update member status and expiry - ALSO CORRECTED
-      const memberUpdateData = {
-        expiry_date: newExpiryDate.toISOString().split('T')[0], // Date format, not timestamp
-        status: 'active',
-        updated_at: new Date().toISOString()
-      };
-
-      console.log('🔍 Updating member with:', memberUpdateData);
-
-      const { error: updateError } = await supabase
+      // Fetch all member details for validation
+      const { data: allMembersData, error: allMembersError } = await supabase
         .from('members')
-        .update(memberUpdateData)
-        .eq('id', memberId);
+        .select('id, first_name, last_name, expiry_date, branch_id')
+        .in('id', allMemberIds);
 
-      if (updateError) {
-        console.error('Member update error:', updateError);
-        return res.status(500).json({
+      if (allMembersError || !allMembersData || allMembersData.length !== allMemberIds.length) {
+        console.error('Error fetching additional members:', allMembersError);
+        return res.status(400).json({
           status: 'error',
-          error: 'Failed to update member'
+          error: 'One or more additional members not found'
         });
       }
 
-      // Step 8: Log the action (with graceful error handling)
-      try {
-        await supabase
-          .from('staff_actions_log')
-          .insert({
-            staff_id: staffId,
-            action_type: 'MEMBER_RENEWAL',
-            description: `Renewed membership for ${member.first_name} ${member.last_name} - ${renewalPackage.name} for ${durationMonths} months`,
-            member_id: memberId,
-            created_at: new Date().toISOString()
+      // Validate all members belong to the same branch
+      const invalidMembers = allMembersData?.filter(m => m.branch_id !== member.branch_id) || [];
+      if (invalidMembers.length > 0) {
+        return res.status(400).json({
+          status: 'error',
+          error: 'All members must belong to the same branch'
+        });
+      }
+
+      // Calculate amount per member (split equally)
+      const amountPerMember = parseFloat(amountPaid) / allMemberIds.length;
+
+      // ✅ Step 6A: Create renewal records for ALL members
+      const renewalPromises = (allMembersData || []).map(memberData => {
+        const renewalData = {
+          member_id: memberData.id,
+          package_id: packageId,
+          renewed_by_staff_id: staffId,
+          payment_method: paymentMethod,
+          amount_paid: amountPerMember,
+          previous_expiry: memberData.expiry_date,
+          new_expiry: newExpiryDate.toISOString().split('T')[0]
+        };
+
+        console.log(`🔍 Creating renewal record for ${memberData.first_name} ${memberData.last_name}:`, renewalData);
+
+        return supabase
+          .from('member_renewals')
+          .insert(renewalData)
+          .select()
+          .single();
+      });
+
+      const renewalResults = await Promise.all(renewalPromises);
+
+      // Check for renewal creation errors
+      for (let i = 0; i < renewalResults.length; i++) {
+        if (renewalResults[i].error) {
+          console.error(`🚨 Renewal creation failed for member ${allMembersData?.[i]?.first_name}:`, renewalResults[i].error);
+          return res.status(500).json({
+            status: 'error',
+            error: `Failed to create renewal record for ${allMembersData?.[i]?.first_name} ${allMembersData?.[i]?.last_name}`,
+            details: renewalResults[i].error?.message || 'Unknown database error'
           });
-        console.log('✅ Action logged successfully');
+        }
+      }
+
+      console.log(`✅ Created ${renewalResults.length} renewal records successfully`);
+
+      // ✅ Step 7: Update ALL members' expiry dates and status
+      const memberUpdatePromises = allMemberIds.map(memberIdToUpdate => {
+        const memberUpdateData = {
+          expiry_date: newExpiryDate.toISOString().split('T')[0],
+          status: 'active',
+          updated_at: new Date().toISOString()
+        };
+
+        console.log(`🔍 Updating member ${memberIdToUpdate}:`, memberUpdateData);
+
+        return supabase
+          .from('members')
+          .update(memberUpdateData)
+          .eq('id', memberIdToUpdate);
+      });
+
+      const updateResults = await Promise.all(memberUpdatePromises);
+
+      // Check for member update errors
+      for (let i = 0; i < updateResults.length; i++) {
+        if (updateResults[i].error) {
+          console.error(`🚨 Member update failed for ${allMembersData?.[i]?.first_name}:`, updateResults[i].error);
+          return res.status(500).json({
+            status: 'error',
+            error: `Failed to update member ${allMembersData?.[i]?.first_name} ${allMembersData?.[i]?.last_name}`
+          });
+        }
+      }
+
+      console.log(`✅ Updated ${allMemberIds.length} members successfully`);
+
+      // ✅ Step 8: Log actions for ALL members
+      try {
+        const actionLogPromises = (allMembersData || []).map(memberData => 
+          supabase
+            .from('staff_actions_log')
+            .insert({
+              staff_id: staffId,
+              action_type: 'MEMBER_RENEWAL',
+              description: `Renewed membership for ${memberData.first_name} ${memberData.last_name} - ${renewalPackage.name} for ${durationMonths} months${allMemberIds.length > 1 ? ` (Family renewal: ${allMemberIds.length} members)` : ''}`,
+              member_id: memberData.id,
+              created_at: new Date().toISOString()
+            })
+        );
+
+        await Promise.all(actionLogPromises);
+        console.log(`✅ Logged ${allMemberIds.length} renewal actions successfully`);
       } catch (logError) {
-        console.warn('⚠️ Failed to log action (continuing anyway):', logError);
-        // Don't fail the renewal just because logging failed
+        console.warn('⚠️ Failed to log some actions (continuing anyway):', logError);
       }
 
       console.log('✅ Member renewal completed successfully');
@@ -576,20 +612,22 @@ router.post('/process',
       res.json({
         status: 'success',
         data: {
-          renewal,
-          member: {
-            ...member,
+          renewals: renewalResults.map(result => result.data),
+          members: (allMembersData || []).map(memberData => ({
+            ...memberData,
             expiry_date: newExpiryDate.toISOString().split('T')[0],
             status: 'active'
-          },
+          })),
           package: renewalPackage,
           staff: {
             id: processStaff.id,
             name: `${processStaff.first_name} ${processStaff.last_name}`,
             role: processStaff.role
-          }
+          },
+          totalMembers: allMemberIds.length,
+          amountPerMember: amountPerMember
         },
-        message: 'Member renewal processed successfully'
+        message: `${allMemberIds.length} member${allMemberIds.length > 1 ? 's' : ''} renewed successfully`
       });
 
     } catch (error) {

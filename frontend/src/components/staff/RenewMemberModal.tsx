@@ -580,6 +580,36 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
                     You can add expired members below to include them in this renewal.
                   </p>
 
+                  {/* Show Selected Additional Members */}
+                  {selectedAdditionalMembers.length > 0 && (
+                    <div className="space-y-3">
+                      <Label className="text-sm font-medium text-foreground">Selected Additional Members:</Label>
+                      <div className="space-y-2">
+                        {selectedAdditionalMembers.map((additionalMember) => (
+                          <div key={additionalMember.id} className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg">
+                            <div className="flex-1">
+                              <p className="font-medium text-green-800">{additionalMember.first_name} {additionalMember.last_name}</p>
+                              <p className="text-sm text-green-600">{additionalMember.email}</p>
+                              <p className="text-xs text-green-500">
+                                Status: {additionalMember.status} • Expires: {new Date(additionalMember.expiry_date).toLocaleDateString()}
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => removeAdditionalMember(additionalMember.id)}
+                              className="h-8 w-8 p-0 text-red-600 hover:text-red-700 border-red-200 hover:border-red-300"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                      <Separator />
+                    </div>
+                  )}
+
                   {/* Search for additional members */}
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
