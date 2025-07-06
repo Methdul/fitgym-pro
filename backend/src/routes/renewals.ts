@@ -412,7 +412,7 @@ router.post('/process',
       // Step 3: Get and validate package
       const { data: renewalPackage, error: packageError } = await supabase
         .from('packages')
-        .select('*')
+        .select('id, name, type, price, duration_months, max_members')
         .eq('id', packageId)
         .single();
 
@@ -424,12 +424,42 @@ router.post('/process',
       }
 
       // Step 4: Calculate new expiry date
+      // ✅ Step 4: Calculate new expiry date with synchronized billing for multi-member packages
       const currentDate = new Date();
-      const currentExpiry = new Date(member.expiry_date);
-      const startDate = currentExpiry > currentDate ? currentExpiry : currentDate;
-      
-      const newExpiryDate = new Date(startDate);
-      newExpiryDate.setMonth(newExpiryDate.getMonth() + parseInt(durationMonths));
+
+      let newExpiryDate: Date;
+
+      // MULTI-MEMBER PACKAGE: All members get synchronized dates
+      if (renewalPackage.max_members > 1) {
+        console.log('🔄 Multi-member package renewal: Using synchronized billing');
+        // All members start from TODAY and expire together
+        newExpiryDate = new Date(currentDate);
+        newExpiryDate.setMonth(newExpiryDate.getMonth() + parseInt(durationMonths));
+        
+        console.log('📅 Synchronized billing dates:', {
+          packageType: renewalPackage.type,
+          maxMembers: renewalPackage.max_members,
+          startDate: currentDate.toISOString().split('T')[0],
+          newExpiry: newExpiryDate.toISOString().split('T')[0],
+          durationMonths
+        });
+        
+      } else {
+        // INDIVIDUAL PACKAGE: Use original logic (extend from current)
+        console.log('👤 Individual package renewal: Using original logic');
+        const currentExpiry = new Date(member.expiry_date);
+        let startFromDate = currentExpiry > currentDate ? currentExpiry : currentDate;
+        
+        newExpiryDate = new Date(startFromDate);
+        newExpiryDate.setMonth(newExpiryDate.getMonth() + parseInt(durationMonths));
+        
+        console.log('📅 Individual renewal dates:', {
+          currentExpiry: member.expiry_date,
+          startFrom: startFromDate.toISOString().split('T')[0],
+          newExpiry: newExpiryDate.toISOString().split('T')[0],
+          durationMonths
+        });
+      }
 
       // Step 5: PHASE 1 FIX - Second staff verification before processing
       const { data: processStaff, error: processStaffError } = await supabase

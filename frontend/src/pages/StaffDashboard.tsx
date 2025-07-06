@@ -651,7 +651,6 @@ const StaffDashboard = () => {
   };
 
   const handleAddPackage = async () => {
-    alert("DEBUG: Function is running!"); // ADD THIS LINE FIRST
     console.log("🔍 DEBUG: Function started"); // ADD THIS LINE TOO
     if (!validatePackageForm() || !branchId) return;
 

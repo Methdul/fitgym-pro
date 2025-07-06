@@ -1,5 +1,15 @@
 // backend/src/routes/members.ts - COMPLETE ERROR-FREE VERSION
 import express, { Request, Response } from 'express';
+
+// Extend Request interface for member deletion
+interface MemberDeleteRequest extends Request {
+  memberToDelete?: {
+    id: string;
+    name: string;
+    email: string;
+    branch_id: string;
+  };
+}
 import { supabase } from '../lib/supabase';
 import { authenticate, optionalAuth } from '../middleware/auth';
 import { 
@@ -212,7 +222,7 @@ router.post('/',
       // Check if package exists
       const { data: package_, error: packageError } = await supabase
         .from('packages')
-        .select('id, name, type, price, duration_months, is_active')
+        .select('id, name, type, price, duration_months,max_members,is_active')
         .eq('id', packageId)
         .single();
       
@@ -301,25 +311,45 @@ router.post('/',
         }
 
         // Calculate dates based on whether it's a new or existing member
+        // Calculate dates based on package type and member type
         let memberStartDate: string, memberExpiryDate: string, memberStatus: string;
 
-        if (startDate) {
-          // Existing member: use provided start date (last payment date)
-          memberStartDate = startDate;
-          if (expiryDate) {
-            memberExpiryDate = expiryDate;
+        // MULTI-MEMBER PACKAGE LOGIC: All members get synchronized dates
+        if (package_.max_members > 1) {
+          console.log('🔄 Multi-member package: Using synchronized billing for all members');
+          // All members in family/couple packages start TODAY and expire together
+          memberStartDate = new Date().toISOString().split('T')[0];
+          const expiryDateObj = new Date();
+          expiryDateObj.setMonth(expiryDateObj.getMonth() + (duration || package_.duration_months || 1));
+          memberExpiryDate = expiryDateObj.toISOString().split('T')[0];
+          
+          console.log('📅 Synchronized dates:', {
+            startDate: memberStartDate,
+            expiryDate: memberExpiryDate,
+            packageType: package_.type,
+            maxMembers: package_.max_members
+          });
+          
+        } else {
+          // INDIVIDUAL PACKAGE LOGIC: Use original logic for individual packages
+          if (startDate) {
+            // Existing member: use provided start date (last payment date)
+            memberStartDate = startDate;
+            if (expiryDate) {
+              memberExpiryDate = expiryDate;
+            } else {
+              // Calculate expiry from start date + package duration
+              const start = new Date(startDate);
+              start.setMonth(start.getMonth() + (duration || package_.duration_months || 1));
+              memberExpiryDate = start.toISOString().split('T')[0];
+            }
           } else {
-            // Calculate expiry from start date + package duration
-            const start = new Date(startDate);
+            // New member: use current date
+            memberStartDate = new Date().toISOString().split('T')[0];
+            const start = new Date();
             start.setMonth(start.getMonth() + (duration || package_.duration_months || 1));
             memberExpiryDate = start.toISOString().split('T')[0];
           }
-        } else {
-          // New member: use current date
-          memberStartDate = new Date().toISOString().split('T')[0];
-          const start = new Date();
-          start.setMonth(start.getMonth() + (duration || package_.duration_months || 1));
-          memberExpiryDate = start.toISOString().split('T')[0];
         }
 
         // Calculate status based on expiry date
@@ -559,7 +589,22 @@ router.delete('/:id',
           });
         }
       }
-      
+
+      // Store member info for audit log before deletion
+      res.locals.memberToDelete = {
+        id: existingMember.id,
+        name: `${existingMember.first_name} ${existingMember.last_name}`,
+        email: existingMember.email,
+        branch_id: existingMember.branch_id
+      };
+
+      // Pass additional context to audit log
+      res.locals.auditContext = {
+        memberName: `${existingMember.first_name} ${existingMember.last_name}`,
+        memberEmail: existingMember.email,
+        actionDescription: `Deleted member: ${existingMember.first_name} ${existingMember.last_name} (${existingMember.email})`
+      };
+
       // Delete member
       const { error } = await supabase
         .from('members')
@@ -572,7 +617,64 @@ router.delete('/:id',
       }
       
       console.log('✅ Member deleted successfully');
-      
+
+      // Manual audit log entry with member details
+      try {
+        const memberName = `${existingMember.first_name} ${existingMember.last_name}`;
+        
+        await supabase
+          .from('audit_logs')
+          .insert({
+            user_id: req.user.id,
+            user_email: req.user.email || 'system',
+            action: `DELETED_MEMBER_${memberName.replace(/\s+/g, '_').toUpperCase()}`,
+            resource_type: 'member',
+            resource_id: existingMember.id,
+            branch_id: existingMember.branch_id,
+            success: true,
+            status_code: 200,
+            timestamp: new Date().toISOString(),
+            request_data: {
+              actionType: 'MEMBER_DELETION',
+              memberName: memberName,
+              memberEmail: existingMember.email,
+              deletedBy: req.user.email || 'system',
+              description: `Deleted member: ${memberName}`,
+              humanReadableAction: `🗑️ Member Deleted: ${memberName}`
+            },
+            response_data: {
+              status: 'success',
+              message: `${memberName} has been permanently deleted from the system`,
+              memberDetails: {
+                name: memberName,
+                email: existingMember.email,
+                id: existingMember.id
+              }
+            }
+          });
+          
+        console.log('✅ Detailed audit log created');
+      } catch (auditError) {
+        console.error('❌ Failed to create detailed audit log:', auditError);
+      }
+
+      // DEBUG: Check if audit data is properly stored
+      console.log('🔍 DEBUG: res.locals.memberToDelete =', res.locals.memberToDelete);
+
+      // DEBUG: Manually check audit log creation
+      try {
+        const auditCheck = await supabase
+          .from('staff_actions_log')
+          .select('*')
+          .eq('action', 'DELETE_MEMBER')
+          .order('timestamp', { ascending: false })
+          .limit(1);
+        
+        console.log('🔍 DEBUG: Latest DELETE_MEMBER audit log =', auditCheck.data);
+      } catch (debugError) {
+        console.log('🔍 DEBUG: Error checking audit log =', debugError);
+      }
+
       res.json({
         status: 'success',
         message: 'Member deleted successfully',

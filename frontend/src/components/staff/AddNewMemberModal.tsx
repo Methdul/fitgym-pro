@@ -30,7 +30,8 @@ import {
   Copy,
   Calendar,
   Mail,
-  UserPlus
+  UserPlus,
+  AlertTriangle
 } from 'lucide-react';
 import type { Member, Package as PackageType, BranchStaff } from '@/types';
 import { supabase } from '@/lib/supabase';
@@ -61,7 +62,7 @@ interface MemberFormData {
   lastPaymentDate?: string;
 }
 
-export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,authenticatedStaff }: AddNewMemberModalProps) => {
+export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded, authenticatedStaff }: AddNewMemberModalProps) => {
   // State management - keeping original structure
   const [currentStep, setCurrentStep] = useState<Step>('package');
   const [loading, setLoading] = useState(false);
@@ -150,6 +151,14 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
     return expiryDate.toISOString().split('T')[0];
   };
 
+  // Initialize price when package is selected
+  useEffect(() => {
+    if (selectedPackage) {
+      const totalPrice = selectedPackage.price; // ✅ No multiplication
+      setCustomPrice(totalPrice.toString());
+    }
+  }, [selectedPackage]);
+
   const fetchPackages = async () => {
     try {
       const response = await fetch(
@@ -220,6 +229,17 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
 
   // Existing member selection functions - ORIGINAL
   const selectExistingMember = (member: Member) => {
+    // Check if member is already selected in any form
+    const isAlreadySelected = memberForms.some(form => form.id === member.id);
+    if (isAlreadySelected) {
+      toast({
+        title: "Member Already Selected",
+        description: `${member.first_name} ${member.last_name} is already selected for another form.`,
+        variant: "destructive"
+      });
+      return;
+    }
+
     const updatedForms = [...memberForms];
     updatedForms[currentMemberIndex] = {
       id: member.id,
@@ -291,8 +311,8 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
     if (!member) return false;
     
     if (member.isExisting) {
-      // For existing members, require lastPaymentDate
-      return !!member.lastPaymentDate;
+      // For existing members, just check that we have basic info (auto-populated)
+      return !!(member.firstName && member.lastName && member.email);
     }
 
     const required = ['firstName', 'lastName', 'email', 'phone', 'nationalId'];
@@ -393,10 +413,10 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
     }
   };
 
-  // Calculate total price - ORIGINAL
   const calculatePrice = () => {
     if (!selectedPackage) return 0;
-    return selectedPackage.price * duration;
+    // Package price is the TOTAL price for the entire duration
+    return selectedPackage.price;
   };
 
   // Handle price reset to calculated value - ORIGINAL
@@ -507,7 +527,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
             isExistingMember: true
           } : {
             customPrice: parseFloat(customPrice || '0'),
-            duration: duration,
+            duration: selectedPackage?.duration_months,
             paymentMethod: paymentMethod
           })
         };
@@ -680,12 +700,23 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
         };
 
         // Filter existing members for search
-        const filteredExistingMembers = existingMembers.filter(member =>
-          existingMemberSearch === '' || 
-          `${member.first_name} ${member.last_name}`.toLowerCase().includes(existingMemberSearch.toLowerCase()) ||
-          member.email.toLowerCase().includes(existingMemberSearch.toLowerCase()) ||
-          member.national_id.includes(existingMemberSearch)
-        );
+        const filteredExistingMembers = existingMembers.filter(member => {
+          // First filter by search terms
+          const matchesSearch = existingMemberSearch === '' || 
+            `${member.first_name} ${member.last_name}`.toLowerCase().includes(existingMemberSearch.toLowerCase()) ||
+            member.email.toLowerCase().includes(existingMemberSearch.toLowerCase()) ||
+            member.national_id.includes(existingMemberSearch);
+          
+          // Then filter out already selected members
+          const isNotSelected = !memberForms.some(form => form.id === member.id);
+          
+          // Only show expired members (not active)
+          const today = new Date();
+          const expiryDate = new Date(member.expiry_date);
+          const isExpired = expiryDate < today;
+          
+          return matchesSearch && isNotSelected && isExpired;
+        });
 
         return (
           <div className="space-y-6">
@@ -704,11 +735,11 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
             {/* Multi-member navigation */}
             {memberForms.length > 1 && (
               <div className="flex justify-center space-x-2 mb-6">
-                {memberForms.map((_, index) => (
+                {memberForms.map((form, index) => (
                   <button
                     key={index}
                     onClick={() => setCurrentMemberIndex(index)}
-                    className={`w-8 h-8 rounded-full text-sm font-medium transition-colors ${
+                    className={`w-8 h-8 rounded-full text-sm font-medium transition-colors relative ${
                       index === currentMemberIndex
                         ? 'bg-primary text-primary-foreground'
                         : index < currentMemberIndex
@@ -717,6 +748,10 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
                     }`}
                   >
                     {index + 1}
+                    {/* Add indicator for existing members */}
+                    {form.isExisting && (
+                      <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border border-white"></div>
+                    )}
                   </button>
                 ))}
               </div>
@@ -756,7 +791,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
                       {filteredExistingMembers.slice(0, 5).map((member) => (
                         <div
                           key={member.id}
-                          className="flex items-center justify-between p-3 bg-white rounded border cursor-pointer hover:border-primary/50"
+                          className="flex items-center justify-between p-3 bg-gray-800 border border-gray-600 rounded cursor-pointer hover:border-primary/50 hover:bg-gray-700"
                           onClick={() => selectExistingMember(member)}
                         >
                           <div>
@@ -781,21 +816,33 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
             {/* Member information form */}
             <Card className="border-border gym-card-gradient">
               <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base text-foreground">
-                    {currentMember.isExisting ? 'Existing Member Selected' : 'Personal Information'}
-                  </CardTitle>
-                  {currentMember.isExisting && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => removeSelectedMember(currentMember.id!)}
-                      className="w-fit"
-                    >
-                      Use New Member Instead
-                    </Button>
-                  )}
-                </div>
+                <CardTitle className="text-base text-foreground">
+                  {currentMember.isExisting ? 'Existing Member Selected' : 'Personal Information'}
+                </CardTitle>
+                {/* Selected Member Display */}
+                {currentMember.isExisting && (
+                  <div className="mt-3 p-3 bg-gray-800 border border-gray-600 rounded-lg">
+                    <div className="flex items-center gap-2 text-gray-100 mb-2">
+                      <UserCheck className="h-4 w-4" />
+                      <span className="font-medium">Selected Member:</span>
+                    </div>
+                    <div className="text-sm space-y-1 text-gray-200">
+                      <p><strong className="text-gray-100">Name:</strong> {currentMember.firstName} {currentMember.lastName}</p>
+                      <p><strong className="text-gray-100">Email:</strong> {currentMember.email}</p>
+                      <p><strong className="text-gray-100">National ID:</strong> {currentMember.nationalId}</p>
+                    </div>
+                    <div className="mt-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => removeSelectedMember(currentMember.id!)}
+                        className="text-red-600 hover:text-red-700 border-red-200 hover:border-red-300"
+                      >
+                        Remove & Use New Member
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -840,18 +887,59 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
 
                 {/* ADD THIS NEW FIELD */}
                 {currentMember.isExisting && (
-                  <div className="md:col-span-2">
-                    <Label htmlFor="lastPaymentDate" className="text-foreground">Last Payment Date *</Label>
-                    <Input
-                      id="lastPaymentDate"
-                      type="date"
-                      value={currentMember.lastPaymentDate || ''}
-                      onChange={(e) => updateMemberForm(currentMemberIndex, { lastPaymentDate: e.target.value })}
-                      className="mt-1 bg-background border-border text-foreground"
-                    />
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Enter when this person last paid for their membership
-                    </p>
+                  <div className="md:col-span-2 space-y-4">
+                    {/* Current Expiry Date (Read-only) */}
+                    <div>
+                      <Label className="text-foreground">Current Expiry Date</Label>
+                      <div className="mt-1 p-3 bg-red-50 border border-red-200 rounded-lg">
+                        <div className="flex items-center gap-2 text-red-700">
+                          <AlertTriangle className="h-4 w-4" />
+                          <span className="font-medium">
+                            Expired: {existingMembers.find(m => m.id === currentMember.id)?.expiry_date 
+                              ? new Date(existingMembers.find(m => m.id === currentMember.id)!.expiry_date).toLocaleDateString()
+                              : 'Unknown'
+                            }
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* New Expiry Date (Calculated) */}
+                    {/* New Expiry Date (Calculated) */}
+                    {selectedPackage && (
+                      <div>
+                        <Label className="text-foreground">New Expiry Date</Label>
+                        <div className="mt-1 p-3 bg-green-50 border border-green-200 rounded-lg">
+                          <div className="flex items-center gap-2 text-green-700">
+                            <CheckCircle className="h-4 w-4" />
+                            <span className="font-medium">
+                              Will expire: {(() => {
+                                // For multi-member packages: all members get same dates (synchronized billing)
+                                if (selectedPackage.max_members > 1) {
+                                  const today = new Date();
+                                  const expiryDate = new Date(today);
+                                  expiryDate.setMonth(expiryDate.getMonth() + (selectedPackage.duration_months || duration));
+                                  return expiryDate.toLocaleDateString();
+                                } else {
+                                  // For individual packages: use old logic
+                                  const currentExpiry = existingMembers.find(m => m.id === currentMember.id)?.expiry_date;
+                                  if (!currentExpiry) return 'Unknown';
+                                  const newExpiry = new Date(currentExpiry);
+                                  newExpiry.setMonth(newExpiry.getMonth() + (selectedPackage.duration_months || duration));
+                                  return newExpiry.toLocaleDateString();
+                                }
+                              })()}
+                            </span>
+                          </div>
+                          <p className="text-xs text-green-600 mt-1">
+                            {selectedPackage.max_members > 1 
+                              ? `Synchronized billing: All family members start today and expire together`
+                              : `Calculated: Current expiry + ${selectedPackage.duration_months || duration} months`
+                            }
+                          </p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1099,19 +1187,15 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
                     // Original: New Member Fields
                     <>
                       <div className="flex items-center justify-between">
-                        <Label htmlFor="duration" className="text-foreground">Duration *</Label>
-                        <Select value={duration.toString()} onValueChange={(value) => setDuration(parseInt(value))}>
-                          <SelectTrigger className="w-32 bg-background border-border">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {[1, 2, 3, 6, 12].map((months) => (
-                              <SelectItem key={months} value={months.toString()}>
-                                {months} month{months > 1 ? 's' : ''}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <Label className="text-foreground">Duration</Label>
+                        <div className="flex items-center gap-2">
+                          <span className="text-foreground font-medium">
+                            {selectedPackage?.duration_months} month{selectedPackage?.duration_months !== 1 ? 's' : ''}
+                          </span>
+                          <Badge variant="secondary" className="text-xs">
+                            Package Default
+                          </Badge>
+                        </div>
                       </div>
                       
                       <div className="flex items-center justify-between">

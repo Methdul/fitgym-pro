@@ -45,7 +45,8 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
   // Helper functions from AddNewMemberModal
   const calculatePrice = () => {
     if (!selectedPackage) return 0;
-    return selectedPackage.price * duration;
+    // Package price is the TOTAL price for the entire duration
+    return selectedPackage.price;
   };
 
   const resetPriceToCalculated = () => {
@@ -65,13 +66,13 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
     }
   }, [isOpen, branchId]);
 
-  // Update price when duration changes
+  // Update price when package changes
   useEffect(() => {
-    if (selectedPackage && duration) {
-      const totalPrice = selectedPackage.price * duration;
+    if (selectedPackage) {
+      const totalPrice = selectedPackage.price; // ✅ Remove multiplication
       setCustomPrice(totalPrice.toString());
     }
-  }, [selectedPackage, duration]);
+  }, [selectedPackage]);
 
   // Fetch existing members when couple/family package is selected
   useEffect(() => {
@@ -170,19 +171,48 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
     const searchLower = existingMemberSearch.toLowerCase();
     const expired = getExpiredMembers();
     
-    return expired.filter(member => 
-      member.first_name.toLowerCase().includes(searchLower) ||
-      member.last_name.toLowerCase().includes(searchLower) ||
-      member.email.toLowerCase().includes(searchLower)
-    );
+    return expired.filter(member => {
+      // Filter by search terms
+      const matchesSearch = member.first_name.toLowerCase().includes(searchLower) ||
+        member.last_name.toLowerCase().includes(searchLower) ||
+        member.email.toLowerCase().includes(searchLower);
+      
+      // Filter out already selected members
+      const isNotSelected = !selectedAdditionalMembers.some(selected => selected.id === member.id);
+      
+      return matchesSearch && isNotSelected;
+    });
   };
 
   const addAdditionalMember = (additionalMember: Member) => {
+    // Check if already selected
     if (selectedAdditionalMembers.find(m => m.id === additionalMember.id)) {
+      toast({
+        title: "Member Already Selected",
+        description: `${additionalMember.first_name} ${additionalMember.last_name} is already added to this renewal.`,
+        variant: "destructive"
+      });
       return;
     }
+    
+    // Check maximum member limit
+    const maxAdditionalMembers = (selectedPackage?.max_members || 1) - 1;
+    if (selectedAdditionalMembers.length >= maxAdditionalMembers) {
+      toast({
+        title: "Maximum Members Reached",
+        description: `This package allows only ${selectedPackage?.max_members} total members.`,
+        variant: "destructive"
+      });
+      return;
+    }
+    
     setSelectedAdditionalMembers(prev => [...prev, additionalMember]);
     setExistingMemberSearch('');
+    
+    toast({
+      title: "Member Added",
+      description: `${additionalMember.first_name} ${additionalMember.last_name} has been added to the renewal.`,
+    });
   };
 
   const removeAdditionalMember = (memberId: string) => {
@@ -210,7 +240,7 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
       const renewalData: any = {
         memberId: member.id,
         packageId: selectedPackage.id,
-        durationMonths: duration,
+        durationMonths: selectedPackage.duration_months,
         amountPaid: parseFloat(customPrice),
         paymentMethod,
         staffId: verification.staffId,
@@ -428,19 +458,15 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
                   </div>
                   
                   <div className="flex items-center justify-between">
-                    <Label htmlFor="duration" className="text-foreground">Duration *</Label>
-                    <Select value={duration.toString()} onValueChange={(value) => setDuration(parseInt(value))}>
-                      <SelectTrigger className="w-32 bg-background border-border">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {[1, 2, 3, 6, 12].map((months) => (
-                          <SelectItem key={months} value={months.toString()}>
-                            {months} month{months > 1 ? 's' : ''}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Label className="text-foreground">Duration</Label>
+                    <div className="flex items-center gap-2">
+                      <span className="text-foreground font-medium">
+                        {selectedPackage?.duration_months} month{selectedPackage?.duration_months !== 1 ? 's' : ''}
+                      </span>
+                      <Badge variant="secondary" className="text-xs">
+                        Package Default
+                      </Badge>
+                    </div>
                   </div>
                   
                   <div className="flex items-center justify-between">
@@ -569,8 +595,9 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
                   <CardTitle className="text-base flex items-center gap-2 text-foreground">
                     <Users className="h-4 w-4" />
                     Additional Members
-                    <Badge variant="outline">
+                    <Badge variant={selectedAdditionalMembers.length >= (selectedPackage.max_members - 1) ? "destructive" : "outline"}>
                       {selectedAdditionalMembers.length}/{selectedPackage.max_members - 1} selected
+                      {selectedAdditionalMembers.length >= (selectedPackage.max_members - 1) && " (MAX)"}
                     </Badge>
                   </CardTitle>
                 </CardHeader>
@@ -615,9 +642,14 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
                     <div className="flex items-center gap-2">
                       <Search className="h-4 w-4 text-muted-foreground" />
                       <Input
-                        placeholder="Search for expired members to add..."
+                        placeholder={
+                          selectedAdditionalMembers.length >= (selectedPackage.max_members - 1) 
+                            ? "Maximum members reached" 
+                            : "Search for expired members to add..."
+                        }
                         value={existingMemberSearch}
                         onChange={(e) => setExistingMemberSearch(e.target.value)}
+                        disabled={selectedAdditionalMembers.length >= (selectedPackage.max_members - 1)}
                         className="flex-1 bg-background border-border"
                       />
                     </div>
@@ -628,10 +660,10 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
                         getFilteredMembers().slice(0, 5).map((member) => {
                           const memberStatus = getMemberStatus(member);
                           return (
-                            <div key={member.id} className="flex items-center justify-between p-2 border border-border rounded bg-background">
+                            <div key={member.id} className="flex items-center justify-between p-3 bg-gray-800 border border-gray-600 rounded cursor-pointer hover:border-primary/50 hover:bg-gray-700">
                               <div className="flex-1">
-                                <p className="font-medium text-foreground">{member.first_name} {member.last_name}</p>
-                                <p className="text-xs text-muted-foreground">{member.email}</p>
+                                <p className="font-medium text-gray-100">{member.first_name} {member.last_name}</p>
+                                <p className="text-xs text-gray-300">{member.email}</p>
                               </div>
                               <div className="flex items-center gap-2">
                                 <Badge 
