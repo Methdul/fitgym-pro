@@ -233,7 +233,7 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
   };
 
   const handleRenewal = async () => {
-    if (!member || !selectedPackage) return;
+     if (!member || !selectedPackage || loading) return;
 
     setLoading(true);
     try {
@@ -253,6 +253,7 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
 
       console.log('🔄 Sending renewal request:', renewalData);
 
+      await new Promise(resolve => setTimeout(resolve, 100));
       const response = await fetch(
         `${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/renewals/process`,
         {
@@ -267,6 +268,12 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
 
       if (!response.ok) {
         const errorData = await response.json();
+        
+        // Handle rate limiting specifically
+        if (response.status === 429) {
+          throw new Error('Too many requests. Please wait a moment and try again.');
+        }
+        
         throw new Error(errorData.error || errorData.message || 'Failed to process renewal');
       }
 

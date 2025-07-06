@@ -45,7 +45,7 @@ import { StaffManagement } from '@/components/staff/StaffManagement';
 import StaffAuthModal from '@/components/staff/StaffAuthModal';
 import AnalyticsTab from '@/components/staff/AnalyticsTab';
 import { useToast } from '@/hooks/use-toast';
-import type { Branch, Member, BranchStaff, Package } from '@/types';
+import { Branch, Member, BranchStaff, Package, PackageType, DurationType } from '@/types';
 
 const StaffDashboard = () => {
   const { branchId } = useParams();
@@ -77,9 +77,11 @@ const StaffDashboard = () => {
   const [selectedPackage, setSelectedPackage] = useState<Package | null>(null);
   const [packageForm, setPackageForm] = useState({
     name: '',
-    type: 'individual' as 'individual' | 'couple' | 'family',
+    type: 'individual' as PackageType,
     price: '',
     duration_months: '',
+    duration_type: 'months' as DurationType,
+    duration_value: '1',
     max_members: '1',
     features: [] as string[]
   });
@@ -249,29 +251,47 @@ const StaffDashboard = () => {
 
   // Data fetching effect
   useEffect(() => {
-    if (authenticatedStaff && branchId) {
+    if (authenticatedStaff && branchId) {  // ✅ Removed && !loading
       console.log('📊 Authenticated staff found, fetching dashboard data...');
       fetchData();
     }
   }, [branchId, authenticatedStaff]);
 
   const fetchData = async () => {
-    if (!branchId) return;
+    console.log('🚨 DEBUG: fetchData called!', { branchId, loading });
+    if (!branchId) return;  // ✅ Only check branchId, not loading
     
+    setLoading(true);
     try {
-      const [branchData, membersData, staffData, packagesData] = await Promise.all([
-        db.branches.getById(branchId),
-        db.members.getByBranch(branchId),  // ✅ Now TypeScript accepts this
-        db.staff.getByBranch(branchId),
-        fetchBranchPackages(branchId)
-      ]);
+      console.log('🔄 Fetching dashboard data...');
+      
+      // Fetch data sequentially with delays
+      const branchData = await db.branches.getById(branchId);
+      
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const membersData = await db.members.getByBranch(branchId);
+      
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const staffData = await db.staff.getByBranch(branchId);
+      
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const packagesData = await fetchBranchPackages(branchId);
 
       if (branchData.data) setBranch(branchData.data);
       if (membersData.data) setMembers(membersData.data);
       if (staffData.data) setStaff(staffData.data);
       if (packagesData.data) setPackages(packagesData.data);
+      
+      console.log('✅ Dashboard data fetched successfully');
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
+      if (error instanceof Error && error.message?.includes('Too many requests')) {
+        toast({
+          title: "Rate Limited",
+          description: "Too many requests. Please wait a moment and refresh.",
+          variant: "destructive",
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -609,6 +629,8 @@ const StaffDashboard = () => {
       type: 'individual',
       price: '',
       duration_months: '',
+      duration_type: 'months',
+      duration_value: '1',
       max_members: '1',
       features: []
     });
@@ -631,10 +653,10 @@ const StaffDashboard = () => {
       });
       return false;
     }
-    if (!packageForm.duration_months || parseInt(packageForm.duration_months) < 1) {
+    if (!packageForm.duration_value || parseInt(packageForm.duration_value) < 1) {
       toast({
         title: "Validation Error",
-        description: "Duration must be at least 1 month",
+        description: "Duration value must be at least 1",
         variant: "destructive",
       });
       return false;
@@ -710,13 +732,17 @@ const StaffDashboard = () => {
         method: 'POST',
         headers: authHeaders,
         body: JSON.stringify({
-          branch_id: branchId,  // ← PUT THIS BACK
+          branch_id: branchId,
           name: packageForm.name,
           type: packageForm.type,
           price: parseFloat(packageForm.price),
-          duration_months: parseInt(packageForm.duration_months),
+          duration_months: packageForm.duration_type === 'months' ? parseInt(packageForm.duration_value) :
+                          packageForm.duration_type === 'weeks' ? Math.ceil(parseInt(packageForm.duration_value) / 4) :
+                          Math.ceil(parseInt(packageForm.duration_value) / 30),
+          duration_type: packageForm.duration_type,
+          duration_value: parseInt(packageForm.duration_value),
           max_members: parseInt(packageForm.max_members),
-          features: packageForm.features.length > 0 ? packageForm.features : ['Gym Access', 'Locker Room'],
+          features: packageForm.features,
           is_active: true
         }),
       });
@@ -724,7 +750,7 @@ const StaffDashboard = () => {
       const result = await response.json();
 
       if (!response.ok || result.status !== 'success') {
-        console.error('❌ Package creation failed:', response.status, result);
+        console.log('📋 Validation details:', JSON.stringify(result.details, null, 2));
         throw new Error(result.error || `HTTP ${response.status}: Failed to create package`);
       }
 
@@ -749,18 +775,20 @@ const StaffDashboard = () => {
       });
     }
   };
-    const handleEditPackage = (pkg: Package) => {
-      setSelectedPackage(pkg);
-      setPackageForm({
-        name: pkg.name,
-        type: pkg.type,
-        price: pkg.price.toString(),
-        duration_months: pkg.duration_months.toString(),
-        max_members: pkg.max_members.toString(),
-        features: pkg.features
-      });
-      setIsEditPackageOpen(true);
-    };
+  const handleEditPackage = (pkg: Package) => {
+    setSelectedPackage(pkg);
+    setPackageForm({
+      name: pkg.name,
+      type: pkg.type,
+      price: pkg.price.toString(),
+      duration_months: pkg.duration_months.toString(),
+      duration_type: pkg.duration_type || 'months',
+      duration_value: pkg.duration_value?.toString() || pkg.duration_months.toString(),
+      max_members: pkg.max_members.toString(),
+      features: pkg.features
+    });
+    setIsEditPackageOpen(true);
+  };
 
     const handleUpdatePackage = async () => {
       if (!validatePackageForm() || !selectedPackage) return;
@@ -1375,13 +1403,19 @@ const StaffDashboard = () => {
                         <Label htmlFor="packageType">Type *</Label>
                         <Select 
                           value={packageForm.type} 
-                          onValueChange={(value: 'individual' | 'couple' | 'family') => {
-                            const defaultMaxMembers = value === 'individual' ? '1' : 
-                                                     value === 'couple' ? '2' : '4';
+                          onValueChange={(value: PackageType) => {
+                            // Smart defaults for max_members
+                            const defaults = {
+                              individual: { max_members: '1', editable: false },
+                              couple: { max_members: '2', editable: false },
+                              family: { max_members: '4', editable: false },
+                              custom: { max_members: '1', editable: true }
+                            };
+                            
                             setPackageForm(prev => ({ 
                               ...prev, 
                               type: value,
-                              max_members: defaultMaxMembers
+                              max_members: defaults[value].max_members
                             }));
                           }}
                         >
@@ -1389,9 +1423,10 @@ const StaffDashboard = () => {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="individual">Individual</SelectItem>
-                            <SelectItem value="couple">Couple</SelectItem>
-                            <SelectItem value="family">Family</SelectItem>
+                            <SelectItem value="individual">Individual (1 person)</SelectItem>
+                            <SelectItem value="couple">Couple (2 people)</SelectItem>
+                            <SelectItem value="family">Family (4 people)</SelectItem>
+                            <SelectItem value="custom">Custom (1-10 people)</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -1401,19 +1436,21 @@ const StaffDashboard = () => {
                           id="packageMaxMembers"
                           type="number"
                           min="1"
-                          max="10"
+                          max={packageForm.type === 'custom' ? "10" : undefined}
                           value={packageForm.max_members}
                           onChange={(e) => setPackageForm(prev => ({ ...prev, max_members: e.target.value }))}
                           placeholder="1"
+                          disabled={packageForm.type !== 'custom'}
                         />
                         <p className="text-xs text-muted-foreground mt-1">
-                          {packageForm.type === 'individual' && 'Usually 1 person'}
-                          {packageForm.type === 'couple' && 'Usually 2 people'}
-                          {packageForm.type === 'family' && 'Usually 3-6 people'}
+                          {packageForm.type === 'individual' && 'Fixed: 1 person'}
+                          {packageForm.type === 'couple' && 'Fixed: 2 people'}
+                          {packageForm.type === 'family' && 'Fixed: 4 people'}
+                          {packageForm.type === 'custom' && 'Adjustable: 1-10 people'}
                         </p>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div>
                         <Label htmlFor="packagePrice">Price ($) *</Label>
                         <Input
@@ -1424,18 +1461,36 @@ const StaffDashboard = () => {
                           value={packageForm.price}
                           onChange={(e) => setPackageForm(prev => ({ ...prev, price: e.target.value }))}
                           placeholder="49.99"
+                          className="mt-1"
                         />
                       </div>
                       <div>
-                        <Label htmlFor="packageDuration">Duration (months) *</Label>
+                        <Label htmlFor="packageDuration">Duration Value *</Label>
                         <Input
                           id="packageDuration"
                           type="number"
                           min="1"
-                          value={packageForm.duration_months}
-                          onChange={(e) => setPackageForm(prev => ({ ...prev, duration_months: e.target.value }))}
+                          value={packageForm.duration_value}
+                          onChange={(e) => setPackageForm(prev => ({ ...prev, duration_value: e.target.value }))}
                           placeholder="1"
+                          className="mt-1"
                         />
+                      </div>
+                      <div>
+                        <Label htmlFor="packageDurationType">Duration Type *</Label>
+                        <Select
+                          value={packageForm.duration_type}
+                          onValueChange={(value: DurationType) => setPackageForm(prev => ({ ...prev, duration_type: value }))}
+                        >
+                          <SelectTrigger className="mt-1">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="days">Days</SelectItem>
+                            <SelectItem value="weeks">Weeks</SelectItem>
+                            <SelectItem value="months">Months</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
                     </div>
                     <div>
@@ -1459,7 +1514,7 @@ const StaffDashboard = () => {
                           <strong>{packageForm.name}</strong> - {packageForm.type} package for up to{' '}
                           <strong className="text-primary">{packageForm.max_members} people</strong>
                           {packageForm.price && ` at $${packageForm.price}`}
-                          {packageForm.duration_months && ` for ${packageForm.duration_months} month${parseInt(packageForm.duration_months) > 1 ? 's' : ''}`}
+                          {packageForm.duration_value && ` for ${packageForm.duration_value} ${packageForm.duration_type}${parseInt(packageForm.duration_value) > 1 ? 's' : ''}`}
                         </p>
                       </div>
                     )}
@@ -1511,7 +1566,12 @@ const StaffDashboard = () => {
                     </div>
                     <div className="flex justify-between text-sm">
                       <span>Duration:</span>
-                      <span className="font-semibold">{pkg.duration_months} month{pkg.duration_months > 1 ? 's' : ''}</span>
+                      <span className="font-semibold">
+                        {pkg.duration_value && pkg.duration_type 
+                          ? `${pkg.duration_value} ${pkg.duration_type}${pkg.duration_value > 1 ? 's' : ''}`
+                          : `${pkg.duration_months} month${pkg.duration_months > 1 ? 's' : ''}`
+                        }
+                      </span>
                     </div>
                     <div className="flex flex-wrap gap-1 mt-2">
                       {pkg.features.map((feature, index) => (
@@ -1596,17 +1656,30 @@ const StaffDashboard = () => {
                   <Label htmlFor="editPackageType">Type *</Label>
                   <Select 
                     value={packageForm.type} 
-                    onValueChange={(value: 'individual' | 'couple' | 'family') => {
-                      setPackageForm(prev => ({ ...prev, type: value }));
+                    onValueChange={(value: PackageType) => {
+                      // Smart defaults for max_members
+                      const defaults = {
+                        individual: { max_members: '1', editable: false },
+                        couple: { max_members: '2', editable: false },
+                        family: { max_members: '4', editable: false },
+                        custom: { max_members: '1', editable: true }
+                      };
+                      
+                      setPackageForm(prev => ({ 
+                        ...prev, 
+                        type: value,
+                        max_members: defaults[value].max_members
+                      }));
                     }}
                   >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="individual">Individual</SelectItem>
-                      <SelectItem value="couple">Couple</SelectItem>
-                      <SelectItem value="family">Family</SelectItem>
+                      <SelectItem value="individual">Individual (1 person)</SelectItem>
+                      <SelectItem value="couple">Couple (2 people)</SelectItem>
+                      <SelectItem value="family">Family (4 people)</SelectItem>
+                      <SelectItem value="custom">Custom (1-10 people)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1625,28 +1698,46 @@ const StaffDashboard = () => {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="editPackagePrice">Price ($) *</Label>
-                  <Input
-                    id="editPackagePrice"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={packageForm.price}
-                    onChange={(e) => setPackageForm(prev => ({ ...prev, price: e.target.value }))}
-                    placeholder="49.99"
-                  />
-                </div>
+                <Label htmlFor="editPackagePrice">Price ($) *</Label>
+                <Input
+                  id="editPackagePrice"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={packageForm.price}
+                  onChange={(e) => setPackageForm(prev => ({ ...prev, price: e.target.value }))}
+                  placeholder="49.99"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="editPackageDuration">Duration (months) *</Label>
+                  <Label htmlFor="editPackageDuration">Duration Value *</Label>
                   <Input
                     id="editPackageDuration"
                     type="number"
                     min="1"
-                    value={packageForm.duration_months}
-                    onChange={(e) => setPackageForm(prev => ({ ...prev, duration_months: e.target.value }))}
+                    value={packageForm.duration_value}
+                    onChange={(e) => setPackageForm(prev => ({ ...prev, duration_value: e.target.value }))}
                     placeholder="1"
                   />
                 </div>
+                <div>
+                  <Label htmlFor="editPackageDurationType">Duration Type *</Label>
+                  <Select
+                    value={packageForm.duration_type}
+                    onValueChange={(value: DurationType) => setPackageForm(prev => ({ ...prev, duration_type: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="days">Days</SelectItem>
+                      <SelectItem value="weeks">Weeks</SelectItem>
+                      <SelectItem value="months">Months</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
               </div>
               <div>
                 <Label htmlFor="editPackageFeatures">Features (comma-separated)</Label>

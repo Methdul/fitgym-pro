@@ -404,13 +404,15 @@ export const commonValidations = {
   // Package validation
   createPackage: [
     validateText('name', 100),
-    validateEnum('type', ['individual', 'couple', 'family']),
+    validateEnum('type', ['individual', 'couple', 'family', 'custom']),
     validatePrice('price'),
     validateInteger('duration_months', 1),
+    validateEnum('duration_type', ['days', 'weeks', 'months']).optional(),
+    validateInteger('duration_value', 1).optional(),
     validateInteger('max_members', 1),
     validateArray('features'),
     validateBoolean('is_active'),
-    validateUUIDInBody('branch_id'),  // ← PUT THIS BACK, but use body validation
+    validateUUIDInBody('branch_id'),
     handleValidationErrors
   ],
   

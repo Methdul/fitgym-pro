@@ -2,7 +2,8 @@
 export type UserRole = 'admin' | 'member';
 export type StaffRole = 'manager' | 'senior_staff' | 'associate';
 export type MemberStatus = 'active' | 'expired' | 'suspended';
-export type PackageType = 'individual' | 'couple';
+export type PackageType = 'individual' | 'couple' | 'family' | 'custom';
+export type DurationType = 'days' | 'weeks' | 'months';
 export type PaymentMethod = 'card' | 'cash';
 
 export interface User {
@@ -69,10 +70,12 @@ export interface Package {
   id: string;
   branch_id: string;
   name: string;
-  type: 'individual' | 'couple' | 'family'; // Add 'family'
+  type: PackageType;
   price: number;
   duration_months: number;
-  max_members: number; // ADD THIS LINE
+  duration_type?: DurationType;  // NEW FIELD
+  duration_value?: number;       // NEW FIELD
+  max_members: number;
   features: string[];
   is_active: boolean;
   created_at: string;
