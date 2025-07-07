@@ -240,7 +240,7 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
       const renewalData: any = {
         memberId: member.id,
         packageId: selectedPackage.id,
-        durationMonths: selectedPackage.duration_months,
+        durationMonths: selectedPackage.duration_value || selectedPackage.duration_months || 1,
         amountPaid: parseFloat(customPrice),
         paymentMethod,
         staffId: verification.staffId,
@@ -468,7 +468,10 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
                     <Label className="text-foreground">Duration</Label>
                     <div className="flex items-center gap-2">
                       <span className="text-foreground font-medium">
-                        {selectedPackage?.duration_months} month{selectedPackage?.duration_months !== 1 ? 's' : ''}
+                        {selectedPackage?.duration_value && selectedPackage?.duration_type 
+                          ? `${selectedPackage.duration_value} ${selectedPackage.duration_type}${selectedPackage.duration_value > 1 ? 's' : ''}`
+                          : `${selectedPackage?.duration_months} month${selectedPackage?.duration_months !== 1 ? 's' : ''}`
+                        }
                       </span>
                       <Badge variant="secondary" className="text-xs">
                         Package Default
@@ -708,7 +711,10 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
                   <span className="text-2xl font-bold text-primary">${customPrice || '0'}</span>
                 </div>
                 <div className="text-sm text-muted-foreground mt-1">
-                  {duration} month{duration > 1 ? 's' : ''} • {1 + selectedAdditionalMembers.length} member{(1 + selectedAdditionalMembers.length) > 1 ? 's' : ''} • {paymentMethod === 'cash' ? 'Cash' : 'Card'} payment
+                  {selectedPackage?.duration_value && selectedPackage?.duration_type 
+                    ? `${selectedPackage.duration_value} ${selectedPackage.duration_type}${selectedPackage.duration_value > 1 ? 's' : ''}` 
+                    : `${duration} month${duration > 1 ? 's' : ''}`
+                  } • {1 + selectedAdditionalMembers.length} member{(1 + selectedAdditionalMembers.length) > 1 ? 's' : ''} • {paymentMethod === 'cash' ? 'Cash' : 'Card'} payment
                 </div>
               </CardContent>
             </Card>
@@ -762,7 +768,12 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Duration:</span>
-                  <span className="font-medium text-foreground">{duration} month{duration > 1 ? 's' : ''}</span>
+                  <span className="font-medium text-foreground">
+                    {selectedPackage?.duration_value && selectedPackage?.duration_type 
+                      ? `${selectedPackage.duration_value} ${selectedPackage.duration_type}${selectedPackage.duration_value > 1 ? 's' : ''}`
+                      : `${duration} month${duration > 1 ? 's' : ''}`
+                    }
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Payment:</span>
@@ -830,7 +841,10 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
               <CardContent className="pt-0">
                 <div className="space-y-2 text-sm text-green-700">
                   <p>✓ Package selected: {selectedPackage?.name}</p>
-                  <p>✓ Duration: {duration} month{duration > 1 ? 's' : ''}</p>
+                  <p>✓ Duration: {selectedPackage?.duration_value && selectedPackage?.duration_type 
+                    ? `${selectedPackage.duration_value} ${selectedPackage.duration_type}${selectedPackage.duration_value > 1 ? 's' : ''}`
+                    : `${duration} month${duration > 1 ? 's' : ''}`
+                  }</p>
                   <p>✓ Amount: ${customPrice}</p>
                   <p>✓ Payment method: {paymentMethod === 'cash' ? 'Cash' : 'Card'}</p>
                   <p>✓ Primary member: {member.first_name} {member.last_name}</p>

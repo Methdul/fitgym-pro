@@ -222,7 +222,7 @@ router.post('/',
       // Check if package exists
       const { data: package_, error: packageError } = await supabase
         .from('packages')
-        .select('id, name, type, price, duration_months,max_members,is_active')
+        .select('id, name, type, price, duration_months, duration_type, duration_value, max_members, is_active')
         .eq('id', packageId)
         .single();
       
@@ -320,7 +320,19 @@ router.post('/',
           // All members in family/couple packages start TODAY and expire together
           memberStartDate = new Date().toISOString().split('T')[0];
           const expiryDateObj = new Date();
-          expiryDateObj.setMonth(expiryDateObj.getMonth() + (duration || package_.duration_months || 1));
+          
+          // 🎯 FIXED: Smart duration calculation for multi-member packages
+          const durationValue = duration || package_.duration_value || package_.duration_months || 1;
+          const durationType = package_.duration_type || 'months';
+          
+          if (durationType === 'days') {
+            expiryDateObj.setDate(expiryDateObj.getDate() + durationValue);
+          } else if (durationType === 'weeks') {
+            expiryDateObj.setDate(expiryDateObj.getDate() + (durationValue * 7));
+          } else {
+            expiryDateObj.setMonth(expiryDateObj.getMonth() + durationValue);
+          }
+          
           memberExpiryDate = expiryDateObj.toISOString().split('T')[0];
           
           console.log('📅 Synchronized dates:', {
@@ -340,14 +352,38 @@ router.post('/',
             } else {
               // Calculate expiry from start date + package duration
               const start = new Date(startDate);
-              start.setMonth(start.getMonth() + (duration || package_.duration_months || 1));
+              
+              // 🎯 FIXED: Smart duration calculation for individual packages (existing member)
+              const durationValue = duration || package_.duration_value || package_.duration_months || 1;
+              const durationType = package_.duration_type || 'months';
+              
+              if (durationType === 'days') {
+                start.setDate(start.getDate() + durationValue);
+              } else if (durationType === 'weeks') {
+                start.setDate(start.getDate() + (durationValue * 7));
+              } else {
+                start.setMonth(start.getMonth() + durationValue);
+              }
+              
               memberExpiryDate = start.toISOString().split('T')[0];
             }
           } else {
             // New member: use current date
             memberStartDate = new Date().toISOString().split('T')[0];
             const start = new Date();
-            start.setMonth(start.getMonth() + (duration || package_.duration_months || 1));
+            
+            // 🎯 FIXED: Smart duration calculation for individual packages (new member)
+            const durationValue = duration || package_.duration_value || package_.duration_months || 1;
+            const durationType = package_.duration_type || 'months';
+            
+            if (durationType === 'days') {
+              start.setDate(start.getDate() + durationValue);
+            } else if (durationType === 'weeks') {
+              start.setDate(start.getDate() + (durationValue * 7));
+            } else {
+              start.setMonth(start.getMonth() + durationValue);
+            }
+            
             memberExpiryDate = start.toISOString().split('T')[0];
           }
         }

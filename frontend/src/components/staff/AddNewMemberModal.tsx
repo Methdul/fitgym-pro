@@ -140,13 +140,24 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
     }
   }, [memberForms[currentMemberIndex]?.nationalId, memberForms[currentMemberIndex]?.autoGenerateEmail]);
 
-  // NEW: Calculate expiry date for existing members
+  // FIXED: Calculate expiry date for existing members using smart duration logic
   const calculateExpiryDate = () => {
-    if (!lastPaidDate || !selectedPackage?.duration_months) return '';
+    if (!lastPaidDate || !selectedPackage) return '';
     
     const startDate = new Date(lastPaidDate);
     const expiryDate = new Date(startDate);
-    expiryDate.setMonth(expiryDate.getMonth() + selectedPackage.duration_months);
+    
+    // 🎯 Smart duration calculation
+    const durationValue = selectedPackage.duration_value || selectedPackage.duration_months || 1;
+    const durationType = selectedPackage.duration_type || 'months';
+    
+    if (durationType === 'days') {
+      expiryDate.setDate(expiryDate.getDate() + durationValue);
+    } else if (durationType === 'weeks') {
+      expiryDate.setDate(expiryDate.getDate() + (durationValue * 7));
+    } else {
+      expiryDate.setMonth(expiryDate.getMonth() + durationValue);
+    }
     
     return expiryDate.toISOString().split('T')[0];
   };
@@ -661,7 +672,9 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-sm text-muted-foreground">Price</span>
-                        <span className="font-semibold text-foreground">${pkg.price}/month</span>
+                        <span className="font-semibold text-foreground">
+                          ${pkg.price}/{pkg.duration_type === 'days' ? 'day' : pkg.duration_type === 'weeks' ? 'week' : 'month'}
+                        </span>
                       </div>
                       <div className="text-xs text-muted-foreground">
                         <ul className="space-y-1">
@@ -915,17 +928,37 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
                             <span className="font-medium">
                               Will expire: {(() => {
                                 // For multi-member packages: all members get same dates (synchronized billing)
+                                // 🎯 FIXED: Smart duration calculation for existing members
+                                const durationValue = selectedPackage.duration_value || selectedPackage.duration_months || duration;
+                                const durationType = selectedPackage.duration_type || 'months';
+                                
                                 if (selectedPackage.max_members > 1) {
                                   const today = new Date();
                                   const expiryDate = new Date(today);
-                                  expiryDate.setMonth(expiryDate.getMonth() + (selectedPackage.duration_months || duration));
+                                  
+                                  if (durationType === 'days') {
+                                    expiryDate.setDate(expiryDate.getDate() + durationValue);
+                                  } else if (durationType === 'weeks') {
+                                    expiryDate.setDate(expiryDate.getDate() + (durationValue * 7));
+                                  } else {
+                                    expiryDate.setMonth(expiryDate.getMonth() + durationValue);
+                                  }
+                                  
                                   return expiryDate.toLocaleDateString();
                                 } else {
-                                  // For individual packages: use old logic
+                                  // For individual packages: extend from current expiry
                                   const currentExpiry = existingMembers.find(m => m.id === currentMember.id)?.expiry_date;
                                   if (!currentExpiry) return 'Unknown';
                                   const newExpiry = new Date(currentExpiry);
-                                  newExpiry.setMonth(newExpiry.getMonth() + (selectedPackage.duration_months || duration));
+                                  
+                                  if (durationType === 'days') {
+                                    newExpiry.setDate(newExpiry.getDate() + durationValue);
+                                  } else if (durationType === 'weeks') {
+                                    newExpiry.setDate(newExpiry.getDate() + (durationValue * 7));
+                                  } else {
+                                    newExpiry.setMonth(newExpiry.getMonth() + durationValue);
+                                  }
+                                  
                                   return newExpiry.toLocaleDateString();
                                 }
                               })()}
@@ -1126,7 +1159,13 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
                   
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-muted-foreground">Duration</span>
-                    <span className="text-foreground">{selectedPackage?.duration_months} months</span>
+                    <span className="text-foreground">
+                      {selectedPackage?.duration_value || selectedPackage?.duration_months || 1} {
+                        selectedPackage?.duration_type === 'days' ? 'day' + ((selectedPackage?.duration_value || 1) > 1 ? 's' : '') :
+                        selectedPackage?.duration_type === 'weeks' ? 'week' + ((selectedPackage?.duration_value || 1) > 1 ? 's' : '') :
+                        'month' + ((selectedPackage?.duration_value || selectedPackage?.duration_months || 1) > 1 ? 's' : '')
+                      }
+                    </span>
                   </div>
 
                   {isExistingMember ? (
@@ -1190,7 +1229,11 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
                         <Label className="text-foreground">Duration</Label>
                         <div className="flex items-center gap-2">
                           <span className="text-foreground font-medium">
-                            {selectedPackage?.duration_months} month{selectedPackage?.duration_months !== 1 ? 's' : ''}
+                            {selectedPackage?.duration_value || selectedPackage?.duration_months || 1} {
+                              selectedPackage?.duration_type === 'days' ? 'day' + ((selectedPackage?.duration_value || 1) > 1 ? 's' : '') :
+                              selectedPackage?.duration_type === 'weeks' ? 'week' + ((selectedPackage?.duration_value || 1) > 1 ? 's' : '') :
+                              'month' + ((selectedPackage?.duration_value || selectedPackage?.duration_months || 1) > 1 ? 's' : '')
+                            }
                           </span>
                           <Badge variant="secondary" className="text-xs">
                             Package Default
@@ -1302,7 +1345,11 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
                   {memberForms.length} member{memberForms.length > 1 ? 's' : ''} • 
                   {isExistingMember 
                     ? ` Already paid • Expires ${expiryDate ? new Date(expiryDate).toLocaleDateString() : 'TBD'}`
-                    : ` ${duration} month${duration > 1 ? 's' : ''} • ${paymentMethod === 'cash' ? 'Cash' : 'Card'} payment`
+                    : ` ${selectedPackage?.duration_value || selectedPackage?.duration_months || duration} ${
+                        selectedPackage?.duration_type === 'days' ? 'day' + ((selectedPackage?.duration_value || duration) > 1 ? 's' : '') :
+                        selectedPackage?.duration_type === 'weeks' ? 'week' + ((selectedPackage?.duration_value || duration) > 1 ? 's' : '') :
+                        'month' + ((selectedPackage?.duration_value || selectedPackage?.duration_months || duration) > 1 ? 's' : '')
+                      } • ${paymentMethod === 'cash' ? 'Cash' : 'Card'} payment`
                   }
                 </div>
               </CardContent>
@@ -1371,9 +1418,18 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
                   <span className="text-muted-foreground">Package:</span>
                   <span className="font-medium text-foreground">{selectedPackage?.name}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Members:</span>
-                  <span className="font-medium text-foreground">{memberForms.length}</span>
+                <div className="space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Members ({memberForms.length}):</span>
+                  </div>
+                  {memberForms.map((member, index) => (
+                    <div key={index} className="flex justify-between pl-4">
+                      <span className="text-muted-foreground">• {member.firstName} {member.lastName}</span>
+                      {member.isExisting && (
+                        <span className="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded">Existing</span>
+                      )}
+                    </div>
+                  ))}
                 </div>
                 {isExistingMember ? (
                   <>
@@ -1398,7 +1454,13 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
                   <>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Duration:</span>
-                      <span className="font-medium text-foreground">{duration} month{duration > 1 ? 's' : ''}</span>
+                      <span className="font-medium text-foreground">
+                        {selectedPackage?.duration_value || selectedPackage?.duration_months || duration} {
+                          selectedPackage?.duration_type === 'days' ? 'day' + ((selectedPackage?.duration_value || duration) > 1 ? 's' : '') :
+                          selectedPackage?.duration_type === 'weeks' ? 'week' + ((selectedPackage?.duration_value || duration) > 1 ? 's' : '') :
+                          'month' + ((selectedPackage?.duration_value || selectedPackage?.duration_months || duration) > 1 ? 's' : '')
+                        }
+                      </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Payment:</span>

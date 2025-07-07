@@ -92,6 +92,13 @@ const StaffDashboard = () => {
   const [deletePin, setDeletePin] = useState<string>('');
   const [isVerifyingDeletion, setIsVerifyingDeletion] = useState(false);
 
+  // Package deletion states (NEW - SAFE TO ADD)
+  const [packageDeleteConfirmOpen, setPackageDeleteConfirmOpen] = useState(false);
+  const [packageToDelete, setPackageToDelete] = useState<Package | null>(null);
+  const [packageDeleteStaffId, setPackageDeleteStaffId] = useState<string>('');
+  const [packageDeletePin, setPackageDeletePin] = useState<string>('');
+  const [isVerifyingPackageDeletion, setIsVerifyingPackageDeletion] = useState(false);
+
   // Helper function to get the ACTUAL status of a member based on expiry date
   const getActualMemberStatus = (member: Member) => {
     const now = new Date();
@@ -673,7 +680,7 @@ const StaffDashboard = () => {
   };
 
   const handleAddPackage = async () => {
-    console.log("🔍 DEBUG: Function started"); // ADD THIS LINE TOO
+    console.log("🔍 DEBUG: Function started");
     if (!validatePackageForm() || !branchId) return;
 
     // DEBUG: Check what's happening in getAuthHeaders
@@ -728,23 +735,25 @@ const StaffDashboard = () => {
       const authHeaders = getAuthHeaders();
       console.log('📤 Request headers being sent:', Object.keys(authHeaders));
 
+      const requestBody = {
+        branch_id: branchId,
+        name: packageForm.name,
+        type: packageForm.type,
+        price: parseFloat(packageForm.price),
+        duration_months: packageForm.duration_type === 'months' ? parseInt(packageForm.duration_value) : 1,
+        duration_type: packageForm.duration_type,
+        duration_value: parseInt(packageForm.duration_value),
+        max_members: parseInt(packageForm.max_members),
+        features: packageForm.features,
+        is_active: true
+      };
+
+      console.log('🔧 DEBUGGING: Request body being sent:', JSON.stringify(requestBody, null, 2));
+
       const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages`, {
         method: 'POST',
         headers: authHeaders,
-        body: JSON.stringify({
-          branch_id: branchId,
-          name: packageForm.name,
-          type: packageForm.type,
-          price: parseFloat(packageForm.price),
-          duration_months: packageForm.duration_type === 'months' ? parseInt(packageForm.duration_value) :
-                          packageForm.duration_type === 'weeks' ? Math.ceil(parseInt(packageForm.duration_value) / 4) :
-                          Math.ceil(parseInt(packageForm.duration_value) / 30),
-          duration_type: packageForm.duration_type,
-          duration_value: parseInt(packageForm.duration_value),
-          max_members: parseInt(packageForm.max_members),
-          features: packageForm.features,
-          is_active: true
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       const result = await response.json();
@@ -813,6 +822,8 @@ const StaffDashboard = () => {
             type: packageForm.type,
             price: parseFloat(packageForm.price),
             duration_months: parseInt(packageForm.duration_months),
+            duration_type: packageForm.duration_type,
+            duration_value: parseInt(packageForm.duration_value),
             max_members: parseInt(packageForm.max_members),
             features: packageForm.features
           }),
@@ -892,6 +903,105 @@ const StaffDashboard = () => {
         description: "Failed to update package",
         variant: "destructive",
       });
+    }
+  };
+
+  // NEW: Open package deletion modal (SAFE - NEW FUNCTION)
+  const initiatePackageDelete = (packageData: Package) => {
+    console.log('🗑️ Opening package deletion modal for:', packageData.name);
+    setPackageToDelete(packageData);
+    setPackageDeleteConfirmOpen(true);
+    setPackageDeleteStaffId('');
+    setPackageDeletePin('');
+  };
+
+  // NEW: Execute package deletion with PIN verification (SAFE - NEW FUNCTION)
+  const executePackageDeleteWithVerification = async () => {
+    if (!packageToDelete || !packageDeleteStaffId || packageDeletePin.length !== 4) {
+      toast({
+        title: "Validation Error", 
+        description: "Please select a staff member and enter their 4-digit PIN",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Check authentication before making request
+    if (!isAuthenticated()) {
+      toast({
+        title: "Authentication Required",
+        description: "Please log in again to continue", 
+        variant: "destructive",
+      });
+      setShowAuthModal(true);
+      return;
+    }
+
+    setIsVerifyingPackageDeletion(true);
+
+    try {
+      console.log(`🗑️ Requesting package deletion with staff verification...`);
+      
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/${packageToDelete.id}`, {
+        method: 'DELETE',
+        headers: {
+          ...getAuthHeaders(),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          staffId: packageDeleteStaffId,
+          pin: packageDeletePin
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to delete package');
+      }
+
+      const result = await response.json();
+
+      if (result.status === 'success') {
+        console.log('✅ Package deleted successfully with staff verification');
+        
+        // Close modal and reset states
+        setPackageDeleteConfirmOpen(false);
+        setPackageToDelete(null);
+        setPackageDeleteStaffId('');
+        setPackageDeletePin('');
+
+        // Refresh packages list
+        if (branchId) {
+          const packagesData = await fetchBranchPackages(branchId);
+          if (packagesData.data) setPackages(packagesData.data);
+        }
+
+        toast({
+          title: "Package Deleted Successfully! 🗑️",
+          description: `"${packageToDelete.name}" has been permanently removed from the system`,
+        });
+      } else {
+        throw new Error(result.error || 'Failed to delete package');
+      }
+    } catch (error) {
+      console.error('❌ Error deleting package:', error);
+      
+      let errorMessage = 'Failed to delete package';
+      if (error instanceof Error) {
+        if (error.message.includes('Invalid PIN')) {
+          errorMessage = 'Invalid PIN for selected staff member';
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
+      toast({
+        title: "Package Deletion Failed",
+        description: errorMessage,
+        variant: "destructive",
+      });
+    } finally {
+      setIsVerifyingPackageDeletion(false);
     }
   };
 
@@ -1594,7 +1704,7 @@ const StaffDashboard = () => {
                         size="sm" 
                         variant="destructive" 
                         className="flex-1"
-                        onClick={() => handleDeletePackage(pkg.id, pkg.name)}
+                        onClick={() => initiatePackageDelete(pkg)}
                       >
                         <Trash2 className="h-4 w-4 mr-1" />
                         Delete
@@ -1912,6 +2022,116 @@ const StaffDashboard = () => {
                   <>
                     <Trash2 className="h-4 w-4 mr-2" />
                     Delete Member
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Package Delete Confirmation Dialog - NEW MODAL */}
+        <Dialog open={packageDeleteConfirmOpen} onOpenChange={setPackageDeleteConfirmOpen}>
+          <DialogContent className="sm:max-w-[500px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Trash2 className="h-5 w-5 text-red-500" />
+                Delete Package - Verification Required
+              </DialogTitle>
+              <DialogDescription>
+                To delete this package, select a staff member and enter their PIN for authorization.
+              </DialogDescription>
+            </DialogHeader>
+            
+            {packageToDelete && (
+              <div className="py-4 space-y-4">
+                {/* Package Info */}
+                <div className="bg-muted p-4 rounded-lg">
+                  <h4 className="font-medium mb-2">Package to Delete:</h4>
+                  <div><strong>Name:</strong> {packageToDelete.name}</div>
+                  <div><strong>Type:</strong> {packageToDelete.type}</div>
+                  <div><strong>Price:</strong> ${packageToDelete.price}</div>
+                  <div><strong>Duration:</strong> {packageToDelete.duration_value || packageToDelete.duration_months} {packageToDelete.duration_type || 'months'}</div>
+                  <div className="flex items-center gap-2">
+                    <strong>Status:</strong>
+                    <Badge variant={packageToDelete.is_active ? "default" : "secondary"}>
+                      {packageToDelete.is_active ? 'Active' : 'Inactive'}
+                    </Badge>
+                  </div>
+                </div>
+
+                {/* Staff Selection */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Select Authorizing Staff Member:</label>
+                  <select 
+                    value={packageDeleteStaffId}
+                    onChange={(e) => setPackageDeleteStaffId(e.target.value)}
+                    className="w-full p-2 border rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-600"
+                    disabled={isVerifyingPackageDeletion}
+                  >
+                    <option value="" className="text-gray-500">Choose staff member...</option>
+                    {staff.map((staffMember) => (
+                      <option key={staffMember.id} value={staffMember.id} className="text-gray-900 dark:text-gray-100">
+                        {staffMember.first_name} {staffMember.last_name} ({staffMember.role})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* PIN Input */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Enter Staff PIN:</label>
+                  <input
+                    type="password"
+                    placeholder="Enter 4-digit PIN"
+                    value={packageDeletePin}
+                    onChange={(e) => setPackageDeletePin(e.target.value.slice(0, 4))}
+                    className="w-full p-2 border rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-600 placeholder-gray-500"
+                    maxLength={4}
+                    disabled={isVerifyingPackageDeletion}
+                  />
+                </div>
+
+                {/* Warning */}
+                <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
+                  <div className="flex items-center gap-2 text-red-600 dark:text-red-400 text-sm">
+                    <XCircle className="h-4 w-4" />
+                    <strong>Warning:</strong>
+                  </div>
+                  <p className="text-red-700 dark:text-red-300 text-sm mt-1">
+                    This action cannot be undone. The package will be permanently removed from the system.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <DialogFooter className="gap-2">
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setPackageDeleteConfirmOpen(false);
+                  setPackageToDelete(null);
+                  setPackageDeleteStaffId('');
+                  setPackageDeletePin('');
+                }}
+                disabled={isVerifyingPackageDeletion}
+              >
+                Cancel
+              </Button>
+              <Button 
+                variant="destructive" 
+                onClick={executePackageDeleteWithVerification}
+                disabled={!packageDeleteStaffId || packageDeletePin.length !== 4 || isVerifyingPackageDeletion}
+                className="bg-red-600 hover:bg-red-700"
+              >
+                {isVerifyingPackageDeletion ? (
+                  <>
+                    <span className="animate-spin mr-2">⏳</span>
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete Package
                   </>
                 )}
               </Button>

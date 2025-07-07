@@ -230,7 +230,7 @@ export const StaffManagement = ({ staff, branchId, onStaffUpdate }: StaffManagem
       console.log('🔐 PIN verification result:', { isValid, staff, error: pinError });
 
       if (!isValid) {
-        throw new Error(pinError || 'Invalid PIN. Please check your credentials.');
+        throw new Error('Invalid PIN for selected staff member. Please check and try again.');
       }
 
       console.log('✅ PIN verified successfully, proceeding with deletion...');
@@ -266,11 +266,14 @@ export const StaffManagement = ({ staff, branchId, onStaffUpdate }: StaffManagem
       const errorMessage = error instanceof Error ? error.message : 'Failed to remove staff member';
       setError(errorMessage);
       
-      toast({
-        title: "Error Removing Staff",
-        description: errorMessage,
-        variant: "destructive"
-      });
+      // Only show toast for non-validation errors (network issues, etc.)
+      if (!error?.message?.includes('PIN') && !error?.message?.includes('credentials')) {
+        toast({
+          title: "Error Removing Staff",
+          description: errorMessage,
+          variant: "destructive"
+        });
+      }
     } finally {
       setLoading(false);
     }

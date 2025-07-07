@@ -259,9 +259,12 @@ router.post('/debug/process-no-auth',
       // Check if package exists
       const { data: renewalPackage, error: packageError } = await supabase
         .from('packages')
-        .select('*')
+        .select('id, name, type, price, duration_months, duration_type, duration_value, max_members')
         .eq('id', packageId)
         .single();
+
+      // Type assertion to include new duration fields
+      const typedPackage = renewalPackage as any;
 
       if (packageError || !renewalPackage) {
         console.log('🐛 Package not found:', packageError?.message);
@@ -412,7 +415,7 @@ router.post('/process',
       // Step 3: Get and validate package
       const { data: renewalPackage, error: packageError } = await supabase
         .from('packages')
-        .select('id, name, type, price, duration_months, max_members')
+        .select('id, name, type, price, duration_months, duration_type, duration_value, max_members')
         .eq('id', packageId)
         .single();
 
@@ -423,6 +426,9 @@ router.post('/process',
         });
       }
 
+      // Type assertion to include new duration fields
+      const typedPackage = renewalPackage as any;
+
       // Step 4: Calculate new expiry date
       // ✅ Step 4: Calculate new expiry date with synchronized billing for multi-member packages
       const currentDate = new Date();
@@ -430,35 +436,49 @@ router.post('/process',
       let newExpiryDate: Date;
 
       // MULTI-MEMBER PACKAGE: All members get synchronized dates
-      if (renewalPackage.max_members > 1) {
+      // MULTI-MEMBER PACKAGE: All members get synchronized dates
+      if (typedPackage.max_members > 1) {
         console.log('🔄 Multi-member package renewal: Using synchronized billing');
         // All members start from TODAY and expire together
         newExpiryDate = new Date(currentDate);
-        newExpiryDate.setMonth(newExpiryDate.getMonth() + parseInt(durationMonths));
+        
+        // Use flexible duration based on package settings
+        if (typedPackage.duration_type === 'days') {
+          newExpiryDate.setDate(newExpiryDate.getDate() + (typedPackage.duration_value || parseInt(durationMonths) * 30));
+        } else if (typedPackage.duration_type === 'weeks') {
+          newExpiryDate.setDate(newExpiryDate.getDate() + ((typedPackage.duration_value || parseInt(durationMonths) * 4) * 7));
+        } else {
+          // Default to months for legacy packages or 'months' type
+          newExpiryDate.setMonth(newExpiryDate.getMonth() + (typedPackage.duration_value || parseInt(durationMonths)));
+        }
         
         console.log('📅 Synchronized billing dates:', {
-          packageType: renewalPackage.type,
-          maxMembers: renewalPackage.max_members,
+          packageType: typedPackage.type,
+          maxMembers: typedPackage.max_members,
+          durationType: typedPackage.duration_type || 'months',
+          durationValue: typedPackage.duration_value || durationMonths,
           startDate: currentDate.toISOString().split('T')[0],
-          newExpiry: newExpiryDate.toISOString().split('T')[0],
-          durationMonths
+          newExpiry: newExpiryDate.toISOString().split('T')[0]
         });
         
       } else {
-        // INDIVIDUAL PACKAGE: Use original logic (extend from current)
+        // INDIVIDUAL PACKAGE: Use original logic (extend from current expiry)
         console.log('👤 Individual package renewal: Using original logic');
         const currentExpiry = new Date(member.expiry_date);
-        let startFromDate = currentExpiry > currentDate ? currentExpiry : currentDate;
         
-        newExpiryDate = new Date(startFromDate);
-        newExpiryDate.setMonth(newExpiryDate.getMonth() + parseInt(durationMonths));
+        // ALWAYS start from current expiry date for individual packages (not today)
+        newExpiryDate = new Date(currentExpiry);
         
-        console.log('📅 Individual renewal dates:', {
-          currentExpiry: member.expiry_date,
-          startFrom: startFromDate.toISOString().split('T')[0],
-          newExpiry: newExpiryDate.toISOString().split('T')[0],
-          durationMonths
-        });
+        // Use flexible duration based on package settings
+        if (typedPackage.duration_type === 'days') {
+          newExpiryDate.setDate(newExpiryDate.getDate() + (typedPackage.duration_value || parseInt(durationMonths) * 30));
+        } else if (typedPackage.duration_type === 'weeks') {
+          newExpiryDate.setDate(newExpiryDate.getDate() + ((typedPackage.duration_value || parseInt(durationMonths) * 4) * 7));
+        } else {
+          // Default to months for legacy packages or 'months' type
+          newExpiryDate.setMonth(newExpiryDate.getMonth() + (typedPackage.duration_value || parseInt(durationMonths)));
+        }
+        
       }
 
       // Step 5: PHASE 1 FIX - Second staff verification before processing
@@ -648,7 +668,7 @@ router.post('/process',
             expiry_date: newExpiryDate.toISOString().split('T')[0],
             status: 'active'
           })),
-          package: renewalPackage,
+          package: typedPackage,
           staff: {
             id: processStaff.id,
             name: `${processStaff.first_name} ${processStaff.last_name}`,

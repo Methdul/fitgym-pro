@@ -45,11 +45,11 @@ router.get('/branch/:branchId',
       const userPermissions = await rbacUtils.getUserPermissions(req.user);
       
       // Select fields based on permissions
-      let selectFields = 'id, name, type, duration_months, max_members, features, is_active';
+      let selectFields = 'id, name, type, duration_months, duration_type, duration_value, max_members, features, is_active';
 
       if (rbacUtils.hasPermission(userPermissions, Permission.PACKAGES_PRICING)) {
         // Include pricing info for users with pricing permission
-        selectFields = 'id, name, type, price, duration_months, max_members, features, is_active, created_at, updated_at';
+        selectFields = 'id, name, type, price, duration_months, duration_type, duration_value, max_members, features, is_active, created_at, updated_at';
       }
 
       
@@ -101,7 +101,7 @@ router.get('/branch/:branchId/active',
       // Public endpoint - limited data
       const { data, error } = await supabase
         .from('packages')
-        .select('id, name, type, price, duration_months, max_members, features, is_active')
+        .select('id, name, type, price, duration_months, duration_type, duration_value, max_members, features, is_active')
         .eq('branch_id', branchId) 
         .eq('is_active', true)
         .order('price', { ascending: true });
@@ -249,11 +249,13 @@ router.post('/',
         name, 
         type, 
         price, 
-        duration_months, 
+        duration_months,
+        duration_type,
+        duration_value,
         max_members,
         features, 
         is_active,
-        branch_id  // ← PUT THIS BACK
+        branch_id
       } = req.body;
       
       // Check if user has pricing permission to set price
@@ -287,10 +289,12 @@ router.post('/',
         type,
         price: parseFloat(price),
         duration_months: parseInt(duration_months),
+        duration_type: duration_type || 'months',
+        duration_value: parseInt(duration_value) || 1,
         max_members: parseInt(max_members),
         features: Array.isArray(features) ? features : ['Gym Access'],
         is_active: Boolean(is_active),
-        branch_id: branch_id,  // ← PUT THIS BACK
+        branch_id: branch_id,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
