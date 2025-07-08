@@ -329,6 +329,8 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
     return '';
   };
 
+  
+
   // ✅ NEW: Validate single field for current member
   const validateField = (fieldName: string, value: string): string => {
     switch (fieldName) {

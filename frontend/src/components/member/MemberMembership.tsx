@@ -1,9 +1,8 @@
-
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Package, Calendar, DollarSign, CreditCard, Clock, Repeat } from 'lucide-react';
+import { Package, Calendar, DollarSign, CreditCard, Clock, Repeat, Shield } from 'lucide-react';
 import { Member, MemberRenewal } from '@/types';
 import { db } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
@@ -11,9 +10,10 @@ import { useToast } from '@/hooks/use-toast';
 interface MemberMembershipProps {
   member: Member;
   onMemberUpdate: (member: Member) => void;
+  isReadOnly?: boolean;  // ✅ ADDED: Read-only prop for staff view
 }
 
-const MemberMembership = ({ member, onMemberUpdate }: MemberMembershipProps) => {
+const MemberMembership = ({ member, onMemberUpdate, isReadOnly = false }: MemberMembershipProps) => {
   const [renewals, setRenewals] = useState<MemberRenewal[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
@@ -29,11 +29,13 @@ const MemberMembership = ({ member, onMemberUpdate }: MemberMembershipProps) => 
       setRenewals(data || []);
     } catch (error) {
       console.error('Error fetching renewals:', error);
-      toast({
-        title: "Error",
-        description: "Failed to load renewal history",
-        variant: "destructive",
-      });
+      if (!isReadOnly) {  // Only show error toast for non-staff users
+        toast({
+          title: "Error",
+          description: "Failed to load renewal history",
+          variant: "destructive",
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -46,6 +48,15 @@ const MemberMembership = ({ member, onMemberUpdate }: MemberMembershipProps) => 
       case 'suspended': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
       default: return 'bg-gray-100 text-gray-800 border-gray-200';
     }
+  };
+
+  const getRenewalDuration = (renewal: MemberRenewal): number => {
+    // Try different possible property names for duration
+    if ('duration_months' in renewal) return (renewal as any).duration_months;
+    if ('duration' in renewal) return (renewal as any).duration;
+    if ('months' in renewal) return (renewal as any).months;
+    // Default to 1 month if no duration found
+    return 1;
   };
 
   const getDaysRemaining = () => {
@@ -66,9 +77,18 @@ const MemberMembership = ({ member, onMemberUpdate }: MemberMembershipProps) => 
           <CardTitle className="flex items-center gap-2">
             <Package className="h-5 w-5" />
             Current Membership
+            {/* ✅ ADDED: Read-only indicator */}
+            {isReadOnly && (
+              <Badge variant="secondary" className="ml-auto">
+                Staff View - Read Only
+              </Badge>
+            )}
           </CardTitle>
           <CardDescription>
-            Your active membership details
+            {isReadOnly 
+              ? "Member's active membership details (staff view)"
+              : "Your active membership details"
+            }
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -76,55 +96,56 @@ const MemberMembership = ({ member, onMemberUpdate }: MemberMembershipProps) => 
             <div className="space-y-2">
               <label className="text-sm font-medium text-muted-foreground">Status</label>
               <Badge className={getStatusColor(member.status)}>
-                {member.status.charAt(0).toUpperCase() + member.status.slice(1)}
+                {member.status ? member.status.charAt(0).toUpperCase() + member.status.slice(1) : 'Unknown'}
               </Badge>
             </div>
-
+            
             <div className="space-y-2">
               <label className="text-sm font-medium text-muted-foreground">Package</label>
-              <p className="text-sm font-medium">{member.package_name}</p>
-              <p className="text-xs text-muted-foreground">
-                {member.package_type} • ${member.package_price}
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-muted-foreground">Start Date</label>
-              <div className="flex items-center gap-2">
-                <Calendar className="h-4 w-4 text-muted-foreground" />
-                <p className="text-sm">{new Date(member.start_date).toLocaleDateString()}</p>
+              <div>
+                <p className="font-medium">{member.package_name}</p>
+                <p className="text-sm text-muted-foreground capitalize">{member.package_type}</p>
               </div>
             </div>
-
+            
             <div className="space-y-2">
-              <label className="text-sm font-medium text-muted-foreground">Expiry Date</label>
-              <div className="flex items-center gap-2">
-                <Clock className="h-4 w-4 text-muted-foreground" />
-                <div>
-                  <p className="text-sm">{new Date(member.expiry_date).toLocaleDateString()}</p>
-                  <p className={`text-xs ${
-                    daysRemaining > 7 ? 'text-green-600' : 
-                    daysRemaining > 0 ? 'text-yellow-600' : 'text-red-600'
-                  }`}>
-                    {daysRemaining > 0 ? `${daysRemaining} days remaining` : 
-                     daysRemaining === 0 ? 'Expires today' : 'Expired'}
-                  </p>
-                </div>
+              <label className="text-sm font-medium text-muted-foreground">Price</label>
+              <div className="flex items-center gap-1">
+                <DollarSign className="h-4 w-4 text-green-600" />
+                <span className="font-bold text-green-600">${member.package_price}</span>
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-muted-foreground">Expiry</label>
+              <div>
+                <p className="text-sm font-medium">{new Date(member.expiry_date).toLocaleDateString()}</p>
+                <p className={`text-xs font-medium ${
+                  daysRemaining > 7 ? 'text-green-600' : 
+                  daysRemaining > 0 ? 'text-yellow-600' : 'text-red-600'
+                }`}>
+                  {daysRemaining > 0 ? `${daysRemaining} days left` : `Expired ${Math.abs(daysRemaining)} days ago`}
+                </p>
               </div>
             </div>
           </div>
 
-          {(member.status === 'expired' || daysRemaining <= 7) && (
-            <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <div className="flex items-center gap-2">
-                <Clock className="h-4 w-4 text-yellow-600" />
-                <p className="text-sm font-medium text-yellow-800">
-                  {member.status === 'expired' ? 'Membership Expired' : 'Membership Expiring Soon'}
+          {/* ✅ CONDITIONAL: Show different messages for staff vs member view */}
+          {!isReadOnly ? (
+            <div className="mt-6 pt-6 border-t border-border">
+              <div className="text-center p-4 bg-muted/30 rounded-lg">
+                <h4 className="font-medium mb-2">Need to renew your membership?</h4>
+                <p className="text-sm text-muted-foreground">
+                  Please visit our front desk or contact our staff for membership renewal assistance.
                 </p>
               </div>
-              <p className="text-sm text-yellow-700 mt-1">
-                Contact your gym staff to renew your membership and continue enjoying all benefits.
-              </p>
+            </div>
+          ) : (
+            <div className="mt-6 pt-6 border-t border-border">
+              <div className="text-sm text-muted-foreground text-center italic bg-muted/30 p-3 rounded">
+                <Shield className="h-4 w-4 inline mr-2" />
+                Staff View - Membership actions are disabled
+              </div>
             </div>
           )}
         </CardContent>
@@ -134,56 +155,61 @@ const MemberMembership = ({ member, onMemberUpdate }: MemberMembershipProps) => 
       <Card className="lg:col-span-2">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Repeat className="h-5 w-5" />
+            <Clock className="h-5 w-5" />
             Renewal History
           </CardTitle>
           <CardDescription>
-            Your membership renewal records
+            {isReadOnly 
+              ? "Member's past membership renewals"
+              : "Your past membership renewals"
+            }
           </CardDescription>
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            <div className="text-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+              <p className="text-sm text-muted-foreground mt-2">Loading renewal history...</p>
             </div>
-          ) : renewals.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <Repeat className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>No renewal history yet</p>
-              <p className="text-sm">Renewals will appear here once processed</p>
-            </div>
-          ) : (
+          ) : renewals.length > 0 ? (
             <div className="space-y-4">
-              {renewals.map((renewal) => (
-                <div key={renewal.id} className="border rounded-lg p-4">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground">Date</label>
-                      <p className="text-sm">{new Date(renewal.created_at).toLocaleDateString()}</p>
+              {renewals.map((renewal, index) => (
+                <div key={index} className="flex items-center justify-between p-4 bg-muted/30 rounded-lg">
+                  <div className="flex items-center gap-4">
+                    <div className="p-2 bg-primary/10 rounded-full">
+                      <Calendar className="h-4 w-4 text-primary" />
                     </div>
                     <div>
-                      <label className="text-xs font-medium text-muted-foreground">Amount</label>
-                      <div className="flex items-center gap-1">
-                        <DollarSign className="h-3 w-3" />
-                        <p className="text-sm font-medium">{renewal.amount_paid}</p>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground">Payment Method</label>
-                      <div className="flex items-center gap-1">
-                        <CreditCard className="h-3 w-3" />
-                        <p className="text-sm capitalize">{renewal.payment_method}</p>
-                      </div>
+                      <p className="font-medium">{new Date(renewal.created_at).toLocaleDateString()}</p>
+                      <p className="text-sm text-muted-foreground">Renewed for {getRenewalDuration(renewal)} month(s)</p>
                     </div>
                   </div>
-                  <div className="mt-2 pt-2 border-t">
-                    <p className="text-xs text-muted-foreground">
-                      Extended from {new Date(renewal.previous_expiry).toLocaleDateString()} to{' '}
-                      {new Date(renewal.new_expiry).toLocaleDateString()}
-                    </p>
+                  <div className="text-right">
+                    <p className="font-bold text-green-600">${renewal.amount_paid}</p>
+                    <p className="text-xs text-muted-foreground">{renewal.payment_method || 'Cash'}</p>
                   </div>
                 </div>
               ))}
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <Repeat className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+              <h4 className="font-medium mb-2">No Renewals Yet</h4>
+              <p className="text-sm text-muted-foreground">
+                {isReadOnly 
+                  ? "This member hasn't renewed their membership yet."
+                  : "You haven't renewed your membership yet."
+                }
+              </p>
+            </div>
+          )}
+
+          {/* ✅ ADDED: Staff view note */}
+          {isReadOnly && renewals.length > 0 && (
+            <div className="mt-4 pt-4 border-t border-border">
+              <div className="text-xs text-muted-foreground bg-blue-50 dark:bg-blue-950/30 p-2 rounded text-center">
+                👁️ You are viewing this member's renewal history in read-only mode
+              </div>
             </div>
           )}
         </CardContent>

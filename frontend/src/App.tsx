@@ -71,6 +71,16 @@ const App = () => (
                 } 
               />
 
+              {/* ✅ NEW: Member Dashboard for Staff View - Individual Member Access */}
+              <Route 
+                path="/member-dashboard/:memberId" 
+                element={
+                  <MemberRoute>
+                    <MemberDashboard />
+                  </MemberRoute>
+                } 
+              />
+
               {/* Staff Dashboard - Uses your existing branch auth */}
               <Route 
                 path="/dashboard/staff/:branchId" 

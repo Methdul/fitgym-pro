@@ -1,13 +1,15 @@
-
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { User, Mail, Phone, MapPin, AlertCircle, Shield } from 'lucide-react';
 import { Member } from '@/types';
 
 interface MemberProfileProps {
   member: Member;
+  isReadOnly?: boolean;  // ✅ ADDED: Read-only prop for staff view
 }
 
-const MemberProfile = ({ member }: MemberProfileProps) => {
+const MemberProfile = ({ member, isReadOnly = false }: MemberProfileProps) => {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       {/* Personal Information */}
@@ -16,9 +18,18 @@ const MemberProfile = ({ member }: MemberProfileProps) => {
           <CardTitle className="flex items-center gap-2">
             <User className="h-5 w-5" />
             Personal Information
+            {/* ✅ ADDED: Read-only indicator */}
+            {isReadOnly && (
+              <Badge variant="secondary" className="ml-auto">
+                Staff View - Read Only
+              </Badge>
+            )}
           </CardTitle>
           <CardDescription>
-            Your basic profile information
+            {isReadOnly 
+              ? "Member's basic profile information (staff view)"
+              : "Your basic profile information"
+            }
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -59,6 +70,23 @@ const MemberProfile = ({ member }: MemberProfileProps) => {
             <label className="text-sm font-medium text-muted-foreground">National ID</label>
             <p className="text-sm font-mono">{member.national_id}</p>
           </div>
+
+          {/* ✅ MODIFIED: Conditional edit button based on read-only mode */}
+          {!isReadOnly ? (
+            <div className="pt-4 border-t border-border">
+              <Button variant="outline" className="w-full">
+                <User className="h-4 w-4 mr-2" />
+                Edit Profile
+              </Button>
+            </div>
+          ) : (
+            <div className="pt-4 border-t border-border">
+              <div className="text-sm text-muted-foreground text-center italic bg-muted/30 p-3 rounded">
+                <Shield className="h-4 w-4 inline mr-2" />
+                Staff View - Profile editing is disabled
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -102,6 +130,15 @@ const MemberProfile = ({ member }: MemberProfileProps) => {
             <label className="text-sm font-medium text-muted-foreground">Last Updated</label>
             <p className="text-sm">{new Date(member.updated_at).toLocaleDateString()}</p>
           </div>
+
+          {/* ✅ ADDED: Staff view note */}
+          {isReadOnly && (
+            <div className="pt-4 border-t border-border">
+              <div className="text-xs text-muted-foreground bg-blue-50 dark:bg-blue-950/30 p-2 rounded text-center">
+                👁️ You are viewing this member's account information in read-only mode
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
