@@ -61,6 +61,92 @@ interface MemberFormData {
   autoGenerateEmail?: boolean; // New optional field
   lastPaymentDate?: string;
 }
+  // ✅ NEW: Enhanced Input Component with validation feedback
+  interface ValidatedInputProps {
+    fieldName: string;
+    label: string;
+    value: string;
+    onChange: (value: string) => void;
+    onBlur: (value: string) => void;
+    getFieldError: (fieldName: string) => string;
+    isFieldTouched: (fieldName: string) => boolean;
+    placeholder?: string;
+    type?: string;
+    disabled?: boolean;
+    required?: boolean;
+    className?: string;
+  }
+
+  const ValidatedInput: React.FC<ValidatedInputProps> = ({
+    fieldName,
+    label,
+    value,
+    onChange,
+    onBlur,
+    getFieldError,
+    isFieldTouched,
+    placeholder,
+    type = "text",
+    disabled = false,
+    required = false,
+    className = ""
+  }) => {
+    const error = getFieldError(fieldName);
+    const touched = isFieldTouched(fieldName);
+    const hasError = touched && error;
+
+    return (
+      <div className="space-y-1">
+        <Label htmlFor={fieldName} className="text-foreground">
+          {label} {required && <span className="text-red-500">*</span>}
+        </Label>
+        <div className="relative">
+          <Input
+            id={fieldName}
+            type={type}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={(e) => onBlur(e.target.value)}
+            placeholder={placeholder}
+            disabled={disabled}
+            className={`${className} bg-background border-border text-foreground ${
+              hasError 
+                ? 'border-red-500 focus-visible:ring-red-500' 
+                : touched && !error 
+                  ? 'border-green-500 focus-visible:ring-green-500' 
+                  : ''
+            }`}
+          />
+          {/* Error Icon */}
+          {hasError && (
+            <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+              <AlertTriangle className="h-4 w-4 text-red-500" />
+            </div>
+          )}
+          {/* Success Icon */}
+          {touched && !error && value.trim() && (
+            <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+              <CheckCircle className="h-4 w-4 text-green-500" />
+            </div>
+          )}
+        </div>
+        {/* Error Message */}
+        {hasError && (
+          <div className="flex items-center gap-1 text-sm text-red-600">
+            <AlertTriangle className="h-3 w-3" />
+            <span>{error}</span>
+          </div>
+        )}
+        {/* Success Message (optional) */}
+        {touched && !error && value.trim() && (
+          <div className="flex items-center gap-1 text-sm text-green-600">
+            <CheckCircle className="h-3 w-3" />
+            <span>Looks good!</span>
+          </div>
+        )}
+      </div>
+    );
+  };
 
 export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded, authenticatedStaff }: AddNewMemberModalProps) => {
   // State management - keeping original structure
@@ -97,6 +183,56 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
   const [isExistingMember, setIsExistingMember] = useState(false);
   const [lastPaidDate, setLastPaidDate] = useState<string>('');
   const [manualPrice, setManualPrice] = useState<string>('');
+
+  // ✅ NEW: Enhanced form validation state
+  const [fieldErrors, setFieldErrors] = useState<{[key: string]: string}>({});
+  const [fieldTouched, setFieldTouched] = useState<{[key: string]: boolean}>({});
+
+  // ✅ NEW: Helper function to get field error for current member
+  const getFieldError = (fieldName: string): string => {
+    const fieldKey = `member-${currentMemberIndex}-${fieldName}`;
+    return fieldErrors[fieldKey] || '';
+  };
+
+  // ✅ NEW: Helper function to check if field has been touched
+  const isFieldTouched = (fieldName: string): boolean => {
+    const fieldKey = `member-${currentMemberIndex}-${fieldName}`;
+    return fieldTouched[fieldKey] || false;
+  };
+
+  // ✅ NEW: Helper function to set field error
+  const setFieldError = (fieldName: string, error: string) => {
+    const fieldKey = `member-${currentMemberIndex}-${fieldName}`;
+    setFieldErrors(prev => ({
+      ...prev,
+      [fieldKey]: error
+    }));
+  };
+
+  // ✅ NEW: Helper function to mark field as touched
+  const markFieldTouched = (fieldName: string) => {
+    const fieldKey = `member-${currentMemberIndex}-${fieldName}`;
+    setFieldTouched(prev => ({
+      ...prev,
+      [fieldKey]: true
+    }));
+  };
+
+  // ✅ NEW: Clear validation state when member index changes
+  const clearValidationForMember = (memberIndex: number) => {
+    const fieldsToCheck = ['firstName', 'lastName', 'email', 'phone', 'nationalId'];
+    const updatedErrors = { ...fieldErrors };
+    const updatedTouched = { ...fieldTouched };
+    
+    fieldsToCheck.forEach(field => {
+      const fieldKey = `member-${memberIndex}-${field}`;
+      delete updatedErrors[fieldKey];
+      delete updatedTouched[fieldKey];
+    });
+    
+    setFieldErrors(updatedErrors);
+    setFieldTouched(updatedTouched);
+  };
 
   
   // Initialize member forms when package is selected - ORIGINAL LOGIC
@@ -139,6 +275,93 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
       });
     }
   }, [memberForms[currentMemberIndex]?.nationalId, memberForms[currentMemberIndex]?.autoGenerateEmail]);
+
+
+  // ✅ NEW: Field validation functions
+  // Name validation (letters, spaces, hyphens, apostrophes only)
+  const validateName = (name: string, fieldName: string): string => {
+    if (!name.trim()) {
+      return `${fieldName} is required`;
+    }
+    if (name.trim().length < 2) {
+      return `${fieldName} must be at least 2 characters`;
+    }
+    if (!/^[a-zA-Z\s'-]+$/.test(name.trim())) {
+      return `${fieldName} can only contain letters, spaces, hyphens, and apostrophes`;
+    }
+    return '';
+  };
+
+  // Email validation
+  const validateEmail = (email: string): string => {
+    if (!email.trim()) {
+      return 'Email is required';
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return 'Please enter a valid email address';
+    }
+    return '';
+  };
+
+  // Phone validation (basic)
+  const validatePhone = (phone: string): string => {
+    if (!phone.trim()) {
+      return 'Phone number is required';
+    }
+    if (phone.trim().length < 8) {
+      return 'Phone number must be at least 8 digits';
+    }
+    if (!/^[\d\s\-\+\(\)]+$/.test(phone.trim())) {
+      return 'Phone number can only contain digits, spaces, dashes, plus signs, and parentheses';
+    }
+    return '';
+  };
+
+  // National ID validation
+  const validateNationalId = (nationalId: string): string => {
+    if (!nationalId.trim()) {
+      return 'National ID is required';
+    }
+    if (nationalId.trim().length < 5) {
+      return 'National ID must be at least 5 characters';
+    }
+    return '';
+  };
+
+  // ✅ NEW: Validate single field for current member
+  const validateField = (fieldName: string, value: string): string => {
+    switch (fieldName) {
+      case 'firstName':
+        return validateName(value, 'First name');
+      case 'lastName':
+        return validateName(value, 'Last name');
+      case 'email':
+        return validateEmail(value);
+      case 'phone':
+        return validatePhone(value);
+      case 'nationalId':
+        return validateNationalId(value);
+      default:
+        return '';
+    }
+  };
+
+  // ✅ NEW: Handle field blur (when user leaves field)
+  const handleFieldBlur = (fieldName: string, value: string) => {
+    markFieldTouched(fieldName);
+    const error = validateField(fieldName, value);
+    setFieldError(fieldName, error);
+  };
+
+  // ✅ NEW: Handle field change with optional real-time validation
+  const handleFieldChange = (fieldName: string, value: string, realTimeValidation: boolean = false) => {
+    // Only handle validation - let the onChange prop handle the form update
+    if (isFieldTouched(fieldName) || realTimeValidation) {
+      const error = validateField(fieldName, value);
+      setFieldError(fieldName, error);
+    }
+  };
 
   // FIXED: Calculate expiry date for existing members using smart duration logic
   const calculateExpiryDate = () => {
@@ -231,6 +454,10 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
     setIsExistingMember(false);
     setLastPaidDate('');
     setManualPrice('');
+    
+    // ✅ NEW: Clear validation state
+    setFieldErrors({});
+    setFieldTouched({});
   };
 
   // Helper function to get member property safely - ORIGINAL
@@ -289,6 +516,31 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
       };
       setMemberForms(updatedForms);
     }
+  };
+
+
+
+
+  // ✅ NEW: Enhanced form validation summary
+  const getValidationSummary = () => {
+    const currentMember = memberForms[currentMemberIndex];
+    if (!currentMember) return { isValid: true, errors: [] };
+    
+    const requiredFields = ['firstName', 'lastName', 'email', 'phone', 'nationalId'];
+    const errors: string[] = [];
+    
+    requiredFields.forEach(field => {
+      const value = currentMember[field as keyof MemberFormData]?.toString() || '';
+      const error = validateField(field, value);
+      if (error) {
+        errors.push(error);
+      }
+    });
+    
+    return {
+      isValid: errors.length === 0,
+      errors
+    };
   };
 
   // Update member form data - ORIGINAL
@@ -859,44 +1111,57 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="firstName" className="text-foreground">First Name *</Label>
-                    <Input
-                      id="firstName"
-                      value={currentMember.firstName}
-                      onChange={(e) => {
-                        console.log('First name change:', e.target.value);
-                        updateMemberForm(currentMemberIndex, { firstName: e.target.value });
-                      }}
-                      placeholder="Enter first name"
-                      className="mt-1 bg-background border-border text-foreground"
-                      disabled={currentMember.isExisting}
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="lastName" className="text-foreground">Last Name *</Label>
-                    <Input
-                      id="lastName"
-                      value={currentMember.lastName}
-                      onChange={(e) => updateMemberForm(currentMemberIndex, { lastName: e.target.value })}
-                      placeholder="Enter last name"
-                      className="mt-1 bg-background border-border text-foreground"
-                      disabled={currentMember.isExisting}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <Label htmlFor="nationalId" className="text-foreground">National ID *</Label>
-                  <Input
-                    id="nationalId"
-                    value={currentMember.nationalId}
-                    onChange={(e) => updateMemberForm(currentMemberIndex, { nationalId: e.target.value })}
-                    placeholder="Enter national ID"
-                    className="mt-1 bg-background border-border text-foreground"
+                  {/* Enhanced First Name Input */}
+                  <ValidatedInput
+                    fieldName="firstName"
+                    label="First Name"
+                    value={currentMember.firstName}
+                    onChange={(value) => {
+                      updateMemberForm(currentMemberIndex, { firstName: value });
+                      handleFieldChange('firstName', value, true);
+                    }}
+                    onBlur={(value) => handleFieldBlur('firstName', value)}
+                    getFieldError={getFieldError}
+                    isFieldTouched={isFieldTouched}
+                    placeholder="Enter first name"
                     disabled={currentMember.isExisting}
+                    required={true}
+                  />
+                  
+                  {/* Enhanced Last Name Input */}
+                  <ValidatedInput
+                    fieldName="lastName"
+                    label="Last Name"
+                    value={currentMember.lastName}
+                    onChange={(value) => {
+                      updateMemberForm(currentMemberIndex, { lastName: value });
+                      handleFieldChange('lastName', value, true);
+                    }}
+                    onBlur={(value) => handleFieldBlur('lastName', value)}
+                    getFieldError={getFieldError}
+                    isFieldTouched={isFieldTouched}
+                    placeholder="Enter last name"
+                    disabled={currentMember.isExisting}
+                    required={true}
                   />
                 </div>
+
+                {/* Enhanced National ID Input */}
+                <ValidatedInput
+                  fieldName="nationalId"
+                  label="National ID"
+                  value={currentMember.nationalId}
+                  onChange={(value) => {
+                    updateMemberForm(currentMemberIndex, { nationalId: value });
+                    handleFieldChange('nationalId', value, true);
+                  }}
+                  onBlur={(value) => handleFieldBlur('nationalId', value)}
+                  getFieldError={getFieldError}
+                  isFieldTouched={isFieldTouched}
+                  placeholder="Enter national ID"
+                  disabled={currentMember.isExisting}
+                  required={true}
+                />
 
                 {/* ADD THIS NEW FIELD */}
                 {currentMember.isExisting && (
@@ -917,7 +1182,6 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
                       </div>
                     </div>
 
-                    {/* New Expiry Date (Calculated) */}
                     {/* New Expiry Date (Calculated) */}
                     {selectedPackage && (
                       <div>
@@ -994,14 +1258,21 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
                     )}
                   </div>
                   
-                  <Input
-                    id="email"
-                    type="email"
+                  <ValidatedInput
+                    fieldName="email"
+                    label=""
                     value={currentMember.email}
-                    onChange={(e) => updateMemberForm(currentMemberIndex, { email: e.target.value })}
+                    onChange={(value) => {
+                      updateMemberForm(currentMemberIndex, { email: value });
+                      handleFieldChange('email', value, true);
+                    }}
+                    onBlur={(value) => handleFieldBlur('email', value)}
+                    getFieldError={getFieldError}
+                    isFieldTouched={isFieldTouched}
                     placeholder={currentMember.autoGenerateEmail ? "Will auto-generate as [nationalId]@gmail.com" : "Enter email address"}
                     disabled={currentMember.isExisting || currentMember.autoGenerateEmail}
-                    className="mt-1 bg-background border-border text-foreground"
+                    required={true}
+                    type="email"
                   />
                   
                   {currentMember.autoGenerateEmail && (
@@ -1019,17 +1290,22 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
                   )}
                 </div>
 
-                <div>
-                  <Label htmlFor="phone" className="text-foreground">Phone *</Label>
-                  <Input
-                    id="phone"
-                    value={currentMember.phone}
-                    onChange={(e) => updateMemberForm(currentMemberIndex, { phone: e.target.value })}
-                    placeholder="Enter phone number"
-                    className="mt-1 bg-background border-border text-foreground"
-                    disabled={currentMember.isExisting}
-                  />
-                </div>
+                {/* Enhanced Phone Input */}
+                <ValidatedInput
+                  fieldName="phone"
+                  label="Phone"
+                  value={currentMember.phone}
+                  onChange={(value) => {
+                    updateMemberForm(currentMemberIndex, { phone: value });
+                    handleFieldChange('phone', value, true);
+                  }}
+                  onBlur={(value) => handleFieldBlur('phone', value)}
+                  getFieldError={getFieldError}
+                  isFieldTouched={isFieldTouched}
+                  placeholder="Enter phone number"
+                  disabled={currentMember.isExisting}
+                  required={true}
+                />
                 <div>
                   <Label htmlFor="address" className="text-foreground">Address</Label>
                   <Input
