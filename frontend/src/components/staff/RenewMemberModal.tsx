@@ -25,6 +25,23 @@ interface RenewMemberModalProps {
   onRenewalComplete: () => void;
 }
 
+// Helper function to format package pricing display
+const formatPackagePrice = (pkg: Package): string => {
+  const durationType = pkg.duration_type || 'months';
+  const durationValue = pkg.duration_value || pkg.duration_months || 1;
+  
+  let unit = '';
+  if (durationType === 'days') {
+    unit = durationValue === 1 ? 'day' : 'days';
+  } else if (durationType === 'weeks') {
+    unit = durationValue === 1 ? 'week' : 'weeks';
+  } else {
+    unit = durationValue === 1 ? 'month' : 'months';
+  }
+  
+  return `$${pkg.price}/${durationValue === 1 ? unit : `${durationValue} ${unit}`}`;
+};
+
 const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete }: RenewMemberModalProps) => {
   const [step, setStep] = useState(1);
   const [packages, setPackages] = useState<Package[]>([]);
@@ -41,6 +58,11 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
   const [existingMemberSearch, setExistingMemberSearch] = useState('');
   const [searchingMembers, setSearchingMembers] = useState(false);
   const { toast } = useToast();
+
+  const handleClose = () => {
+    resetForm();
+    onClose();
+  };
 
   // Helper functions from AddNewMemberModal
   const calculatePrice = () => {
@@ -317,7 +339,7 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
   if (!member) return null;
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
+    <Dialog open={isOpen} onOpenChange={handleClose}>
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto gym-card-gradient border-border">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-foreground">
@@ -410,7 +432,7 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
                           <span className="text-sm text-muted-foreground">Price</span>
-                          <span className="font-semibold text-foreground">${pkg.price}/month</span>
+                          <span className="font-semibold text-foreground">{formatPackagePrice(pkg)}</span>
                         </div>
                         <div className="text-xs text-muted-foreground">
                           <ul className="space-y-1">
@@ -461,7 +483,7 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-muted-foreground">Base Price</span>
-                    <span className="text-foreground">${selectedPackage?.price}/month</span>
+                    <span className="text-foreground">{selectedPackage ? formatPackagePrice(selectedPackage) : 'N/A'}</span>
                   </div>
                   
                   <div className="flex items-center justify-between">
@@ -863,9 +885,13 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
         {/* Navigation Buttons */}
         <div className="flex justify-between pt-4 border-t border-border">
           <div>
-            {step > 1 && (
+            {step > 1 ? (
               <Button variant="outline" onClick={() => setStep(step - 1)}>
                 Back
+              </Button>
+            ) : (
+              <Button variant="outline" onClick={handleClose}>
+                Cancel
               </Button>
             )}
           </div>

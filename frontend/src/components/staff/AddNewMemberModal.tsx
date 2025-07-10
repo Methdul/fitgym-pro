@@ -148,6 +148,24 @@ interface MemberFormData {
     );
   };
 
+  // Helper function to format package pricing display
+const formatPackagePrice = (pkg: PackageType): string => {
+  const durationType = pkg.duration_type || 'months';
+  const durationValue = pkg.duration_value || pkg.duration_months || 1;
+  
+  let unit = '';
+  if (durationType === 'days') {
+    unit = durationValue === 1 ? 'day' : 'days';
+  } else if (durationType === 'weeks') {
+    unit = durationValue === 1 ? 'week' : 'weeks';
+  } else {
+    unit = durationValue === 1 ? 'month' : 'months';
+  }
+  
+  return `$${pkg.price}/${durationValue === 1 ? unit : `${durationValue} ${unit}`}`;
+};
+
+
 export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded, authenticatedStaff }: AddNewMemberModalProps) => {
   // State management - keeping original structure
   const [currentStep, setCurrentStep] = useState<Step>('package');
@@ -926,9 +944,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-sm text-muted-foreground">Price</span>
-                        <span className="font-semibold text-foreground">
-                          ${pkg.price}/{pkg.duration_type === 'days' ? 'day' : pkg.duration_type === 'weeks' ? 'week' : 'month'}
-                        </span>
+                        <span className="font-semibold text-foreground">{formatPackagePrice(pkg)}</span>
                       </div>
                       <div className="text-xs text-muted-foreground">
                         <ul className="space-y-1">
@@ -1432,7 +1448,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-muted-foreground">Base Price</span>
-                    <span className="text-foreground">${selectedPackage?.price}/month</span>
+                    <span className="text-foreground">{selectedPackage ? formatPackagePrice(selectedPackage) : 'N/A'}</span>
                   </div>
                   
                   <div className="flex items-center justify-between">

@@ -47,6 +47,48 @@ import AnalyticsTab from '@/components/staff/AnalyticsTab';
 import { useToast } from '@/hooks/use-toast';
 import { Branch, Member, BranchStaff, Package, PackageType, DurationType } from '@/types';
 
+// Helper functions for package duration limits
+const getDurationLimits = (durationType: DurationType) => {
+  switch(durationType) {
+    case 'days': 
+      return { 
+        min: 1, 
+        max: 6, 
+        suggestion: '7+ days? Use weeks instead',
+        label: 'Days (1-6)'
+      };
+    case 'weeks': 
+      return { 
+        min: 1, 
+        max: 3, 
+        suggestion: '4+ weeks? Use months instead',
+        label: 'Weeks (1-3)' 
+      };
+    case 'months': 
+      return { 
+        min: 1, 
+        max: 24, 
+        suggestion: '',
+        label: 'Months (1+)'
+      };
+    default: 
+      return { min: 1, max: 999, suggestion: '', label: 'Duration' };
+  }
+};
+
+const validateDurationValue = (durationType: DurationType, value: string): string => {
+  const limits = getDurationLimits(durationType);
+  const numValue = parseInt(value);
+  
+  if (isNaN(numValue) || numValue < limits.min) {
+    return `Minimum ${limits.min} ${durationType}`;
+  }
+  if (numValue > limits.max) {
+    return limits.suggestion || `Maximum ${limits.max} ${durationType}`;
+  }
+  return '';
+};
+
 const StaffDashboard = () => {
   const { branchId } = useParams();
   const location = useLocation();
@@ -356,7 +398,7 @@ const StaffDashboard = () => {
       expiringMembers,
       totalStaff: staff.length,
       totalPackages: packages.length,
-      activePackages: packages.filter(p => p.is_active).length,
+      activePackages: packages.length,
       monthlyRevenue,
       newMembersThisMonth,
       retentionRate,
@@ -660,10 +702,11 @@ const StaffDashboard = () => {
       });
       return false;
     }
-    if (!packageForm.duration_value || parseInt(packageForm.duration_value) < 1) {
+    const durationError = validateDurationValue(packageForm.duration_type, packageForm.duration_value);
+    if (durationError) {
       toast({
         title: "Validation Error",
-        description: "Duration value must be at least 1",
+        description: durationError,
         variant: "destructive",
       });
       return false;
@@ -858,53 +901,6 @@ const StaffDashboard = () => {
         });
       }
     };
-
-  const handleTogglePackageStatus = async (id: string, currentStatus: boolean) => {
-    // Check authentication before making request
-    if (!isAuthenticated()) {
-      toast({
-        title: "Authentication Required",
-        description: "Please log in again to continue",
-        variant: "destructive",
-      });
-      setShowAuthModal(true);
-      return;
-    }
-
-    try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/packages/${id}`, {
-        method: 'PUT',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          is_active: !currentStatus
-        }),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok || result.status !== 'success') {
-        throw new Error(result.error || 'Failed to update package');
-      }
-
-      toast({
-        title: "Package Updated",
-        description: `Package ${!currentStatus ? 'activated' : 'deactivated'} successfully`,
-      });
-      
-      if (branchId) {
-        const packagesData = await fetchBranchPackages(branchId);
-        if (packagesData.data) setPackages(packagesData.data);
-      }
-
-    } catch (error) {
-      console.error('Error updating package:', error);
-      toast({
-        title: "Error",
-        description: "Failed to update package",
-        variant: "destructive",
-      });
-    }
-  };
 
   // NEW: Open package deletion modal (SAFE - NEW FUNCTION)
   const initiatePackageDelete = (packageData: Package) => {
@@ -1575,16 +1571,28 @@ const StaffDashboard = () => {
                         />
                       </div>
                       <div>
-                        <Label htmlFor="packageDuration">Duration Value *</Label>
-                        <Input
-                          id="packageDuration"
-                          type="number"
-                          min="1"
-                          value={packageForm.duration_value}
-                          onChange={(e) => setPackageForm(prev => ({ ...prev, duration_value: e.target.value }))}
-                          placeholder="1"
-                          className="mt-1"
-                        />
+                        <Label htmlFor="packageDuration">
+                          {getDurationLimits(packageForm.duration_type).label} *
+                        </Label>
+                        <div className="space-y-2">
+                          <Input
+                            id="packageDuration"
+                            type="number"
+                            min={getDurationLimits(packageForm.duration_type).min}
+                            max={getDurationLimits(packageForm.duration_type).max}
+                            value={packageForm.duration_value}
+                            onChange={(e) => setPackageForm(prev => ({ ...prev, duration_value: e.target.value }))}
+                            placeholder="1"
+                            className="mt-1"
+                          />
+                          {/* Show validation message only */}
+                          {validateDurationValue(packageForm.duration_type, packageForm.duration_value) && (
+                            <p className="text-sm text-red-600 flex items-center gap-1">
+                              <XCircle className="h-3 w-3" />
+                              {validateDurationValue(packageForm.duration_type, packageForm.duration_value)}
+                            </p>
+                          )}
+                        </div>  {/* ← MAKE SURE THIS CLOSING TAG EXISTS */}
                       </div>
                       <div>
                         <Label htmlFor="packageDurationType">Duration Type *</Label>
@@ -1651,13 +1659,9 @@ const StaffDashboard = () => {
                     <CardTitle className="flex items-center justify-between">
                       <span className="truncate">{pkg.name}</span>
                       <div className="flex items-center gap-2">
-                        <Switch
-                          checked={pkg.is_active}
-                          onCheckedChange={() => handleTogglePackageStatus(pkg.id, pkg.is_active)}
-                        />
-                        <Badge variant={pkg.is_active ? "default" : "secondary"}>
-                          {pkg.is_active ? <CheckCircle className="h-3 w-3 mr-1" /> : <XCircle className="h-3 w-3 mr-1" />}
-                          {pkg.is_active ? "Active" : "Inactive"}
+                        <Badge variant="default">
+                          <CheckCircle className="h-3 w-3 mr-1" />
+                          Active
                         </Badge>
                       </div>
                     </CardTitle>
@@ -1821,15 +1825,27 @@ const StaffDashboard = () => {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="editPackageDuration">Duration Value *</Label>
-                  <Input
-                    id="editPackageDuration"
-                    type="number"
-                    min="1"
-                    value={packageForm.duration_value}
-                    onChange={(e) => setPackageForm(prev => ({ ...prev, duration_value: e.target.value }))}
-                    placeholder="1"
-                  />
+                  <Label htmlFor="editPackageDuration">
+                    {getDurationLimits(packageForm.duration_type).label} *
+                  </Label>
+                  <div className="space-y-2">
+                    <Input
+                      id="editPackageDuration"
+                      type="number"
+                      min={getDurationLimits(packageForm.duration_type).min}
+                      max={getDurationLimits(packageForm.duration_type).max}
+                      value={packageForm.duration_value}
+                      onChange={(e) => setPackageForm(prev => ({ ...prev, duration_value: e.target.value }))}
+                      placeholder="1"
+                    />
+                    {/* Show validation message only */}
+                    {validateDurationValue(packageForm.duration_type, packageForm.duration_value) && (
+                      <p className="text-sm text-red-600 flex items-center gap-1">
+                        <XCircle className="h-3 w-3" />
+                        {validateDurationValue(packageForm.duration_type, packageForm.duration_value)}
+                      </p>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <Label htmlFor="editPackageDurationType">Duration Type *</Label>

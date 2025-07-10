@@ -19,6 +19,94 @@ interface StaffManagementProps {
   onStaffUpdate: () => void;
 }
 
+// Staff ValidatedInput Component (Safe - Self-contained)
+interface StaffValidatedInputProps {
+  fieldName: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  onBlur: (value: string) => void;
+  getFieldError: (fieldName: string) => string;
+  isFieldTouched: (fieldName: string) => boolean;
+  placeholder?: string;
+  type?: string;
+  disabled?: boolean;
+  required?: boolean;
+  maxLength?: number;
+}
+
+const StaffValidatedInput: React.FC<StaffValidatedInputProps> = ({
+  fieldName,
+  label,
+  value,
+  onChange,
+  onBlur,
+  getFieldError,
+  isFieldTouched,
+  placeholder,
+  type = "text",
+  disabled = false,
+  required = false,
+  maxLength
+}) => {
+  const error = getFieldError(fieldName);
+  const touched = isFieldTouched(fieldName);
+  const hasError = touched && error;
+
+  return (
+    <div className="space-y-1">
+      <Label htmlFor={fieldName} className="text-foreground">
+        {label} {required && <span className="text-red-500">*</span>}
+      </Label>
+      <div className="relative">
+        <Input
+          id={fieldName}
+          type={type}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={(e) => onBlur(e.target.value)}
+          placeholder={placeholder}
+          disabled={disabled}
+          maxLength={maxLength}
+          className={`bg-background border-border text-foreground ${
+            hasError 
+              ? 'border-red-500 focus-visible:ring-red-500' 
+              : touched && !error 
+                ? 'border-green-500 focus-visible:ring-green-500' 
+                : ''
+          }`}
+        />
+        {/* Error Icon */}
+        {hasError && (
+          <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+            <AlertTriangle className="h-4 w-4 text-red-500" />
+          </div>
+        )}
+        {/* Success Icon */}
+        {touched && !error && value.trim() && (
+          <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+            <CheckCircle className="h-4 w-4 text-green-500" />
+          </div>
+        )}
+      </div>
+      {/* Error Message */}
+      {hasError && (
+        <div className="flex items-center gap-1 text-sm text-red-600">
+          <AlertTriangle className="h-3 w-3" />
+          <span>{error}</span>
+        </div>
+      )}
+      {/* Success Message (optional) */}
+      {touched && !error && value.trim() && (
+        <div className="flex items-center gap-1 text-sm text-green-600">
+          <CheckCircle className="h-3 w-3" />
+          <span>Looks good!</span>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // Define the API base URL with better debugging
 const getAPIBaseURL = () => {
   const envURL = import.meta.env.VITE_API_URL;
@@ -50,12 +138,142 @@ export const StaffManagement = ({ staff, branchId, onStaffUpdate }: StaffManagem
     pin: ''
   });
 
+  // Enhanced Validation State (Safe - Won't interfere with existing)
+  const [fieldErrors, setFieldErrors] = useState<{[key: string]: string}>({});
+  const [fieldTouched, setFieldTouched] = useState<{[key: string]: boolean}>({});
+
   // Remove Staff Form State
   const [removeForm, setRemoveForm] = useState({
     authorizingStaffId: '',
     pin: '',
     reason: ''
   });
+
+  // Enhanced Validation Functions (Safe - Self-contained)
+const validateName = (name: string, fieldName: string): string => {
+  if (!name.trim()) {
+    return `${fieldName} is required`;
+  }
+  if (name.trim().length < 2) {
+    return `${fieldName} must be at least 2 characters`;
+  }
+  if (!/^[a-zA-Z\s'-]+$/.test(name.trim())) {
+    return `${fieldName} can only contain letters, spaces, hyphens, and apostrophes`;
+  }
+  return '';
+};
+
+const validateStaffEmail = (email: string): string => {
+  if (!email.trim()) {
+    return 'Email is required';
+  }
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return 'Please enter a valid email address';
+  }
+  return '';
+};
+
+const validateStaffPhone = (phone: string): string => {
+  if (!phone.trim()) {
+    return 'Phone number is required';
+  }
+  if (phone.trim().length < 8) {
+    return 'Phone number must be at least 8 digits';
+  }
+  if (!/^[\d\s\-\+\(\)]+$/.test(phone.trim())) {
+    return 'Phone number can only contain digits, spaces, dashes, plus signs, and parentheses';
+  }
+  return '';
+};
+
+const validateStaffPin = (pin: string): string => {
+  if (!pin) {
+    return 'PIN is required';
+  }
+  if (!/^\d{4}$/.test(pin)) {
+    return 'PIN must be exactly 4 digits';
+  }
+  const weakPins = ['0000', '1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999', '1234', '4321'];
+  if (weakPins.includes(pin)) {
+    return 'PIN is too weak. Avoid sequential or repeated digits';
+  }
+  return '';
+};
+
+const validateStaffField = (fieldName: string, value: string): string => {
+  switch (fieldName) {
+    case 'firstName':
+      return validateName(value, 'First name');
+    case 'lastName':
+      return validateName(value, 'Last name');
+    case 'email':
+      return validateStaffEmail(value);
+    case 'phone':
+      return validateStaffPhone(value);
+    case 'pin':
+      return validateStaffPin(value);
+    default:
+      return '';
+  }
+};
+
+// Helper functions for validation state
+const getFieldError = (fieldName: string): string => {
+  return fieldErrors[fieldName] || '';
+};
+
+const isFieldTouched = (fieldName: string): boolean => {
+  return fieldTouched[fieldName] || false;
+};
+
+const setFieldError = (fieldName: string, error: string) => {
+  setFieldErrors(prev => ({
+    ...prev,
+    [fieldName]: error
+  }));
+};
+
+const markFieldTouched = (fieldName: string) => {
+  setFieldTouched(prev => ({
+    ...prev,
+    [fieldName]: true
+  }));
+};
+
+const handleFieldBlur = (fieldName: string, value: string) => {
+  markFieldTouched(fieldName);
+  const error = validateStaffField(fieldName, value);
+  setFieldError(fieldName, error);
+};
+
+const handleFieldChange = (fieldName: string, value: string) => {
+  if (isFieldTouched(fieldName)) {
+    const error = validateStaffField(fieldName, value);
+    setFieldError(fieldName, error);
+  }
+};
+
+// Check if entire form is valid
+const isFormValid = (): boolean => {
+  // Check if all required fields have values
+  const requiredFields = ['firstName', 'lastName', 'email', 'phone', 'pin', 'role'];
+  const allFieldsFilled = requiredFields.every(field => {
+    const value = newStaff[field as keyof typeof newStaff];
+    return value && value.toString().trim() !== '';
+  });
+  
+  if (!allFieldsFilled) return false;
+  
+  // Check if there are any validation errors
+  const validationFields = ['firstName', 'lastName', 'email', 'phone', 'pin'];
+  const hasErrors = validationFields.some(field => {
+    const error = validateStaffField(field, newStaff[field as keyof typeof newStaff]);
+    return error !== '';
+  });
+  
+  return !hasErrors;
+};
 
   const getRoleIcon = (role: string) => {
     switch (role) {
@@ -76,36 +294,18 @@ export const StaffManagement = ({ staff, branchId, onStaffUpdate }: StaffManagem
   const seniorStaff = staff.filter(s => s.role === 'manager' || s.role === 'senior_staff');
 
   const validateStaffForm = () => {
-    // First name validation
-    if (!newStaff.firstName.trim()) {
-      setError('First name is required');
-      return false;
-    }
-    if (!/^[a-zA-Z\s'-]+$/.test(newStaff.firstName.trim())) {
-      setError('First name can only contain letters, spaces, hyphens, and apostrophes');
-      return false;
-    }
+    // Enhanced validation using new system
+    const fields = ['firstName', 'lastName', 'email', 'phone', 'pin'];
+    let hasErrors = false;
     
-    // Last name validation  
-    if (!newStaff.lastName.trim()) {
-      setError('Last name is required');
-      return false;
-    }
-    if (!/^[a-zA-Z\s'-]+$/.test(newStaff.lastName.trim())) {
-      setError('Last name can only contain letters, spaces, hyphens, and apostrophes (no numbers like 8282)');
-      return false;
-    }
-    
-    // Email validation
-    if (!newStaff.email.trim()) {
-      setError('Email is required');
-      return false;
-    }
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(newStaff.email)) {
-      setError('Please enter a valid email address');
-      return false;
-    }
+    // Validate all fields and mark as touched
+    fields.forEach(field => {
+      markFieldTouched(field);
+      const value = newStaff[field as keyof typeof newStaff];
+      const error = validateStaffField(field, value);
+      setFieldError(field, error);
+      if (error) hasErrors = true;
+    });
     
     // Role validation
     if (!newStaff.role) {
@@ -113,23 +313,12 @@ export const StaffManagement = ({ staff, branchId, onStaffUpdate }: StaffManagem
       return false;
     }
     
-    // PIN validation
-    if (!newStaff.pin) {
-      setError('PIN is required');
-      return false;
-    }
-    if (!/^\d{4}$/.test(newStaff.pin)) {
-      setError('PIN must be exactly 4 digits');
+    if (hasErrors) {
+      setError('Please fix the validation errors above');
       return false;
     }
     
-    // Check for weak PINs
-    const weakPins = ['0000', '1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999', '1234', '4321'];
-    if (weakPins.includes(newStaff.pin)) {
-      setError('PIN is too weak. Avoid sequential or repeated digits like 1234 or 1111');
-      return false;
-    }
-
+    setError(null);
     return true;
   };
 
@@ -170,6 +359,10 @@ export const StaffManagement = ({ staff, branchId, onStaffUpdate }: StaffManagem
         role: '',
         pin: ''
       });
+
+      // Reset validation state
+      setFieldErrors({});
+      setFieldTouched({});
       
       setShowAddStaff(false);
       onStaffUpdate(); // Refresh the staff list
@@ -455,47 +648,75 @@ export const StaffManagement = ({ staff, branchId, onStaffUpdate }: StaffManagem
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="firstName">First Name *</Label>
-                <Input
-                  id="firstName"
+                <StaffValidatedInput
+                  fieldName="firstName"
+                  label="First Name"
                   value={newStaff.firstName}
-                  onChange={(e) => setNewStaff(prev => ({ ...prev, firstName: e.target.value }))}
+                  onChange={(value) => {
+                    setNewStaff(prev => ({ ...prev, firstName: value }));
+                    handleFieldChange('firstName', value);
+                  }}
+                  onBlur={(value) => handleFieldBlur('firstName', value)}
+                  getFieldError={getFieldError}
+                  isFieldTouched={isFieldTouched}
                   placeholder="John"
                   disabled={loading}
+                  required={true}
                 />
               </div>
-              <div>
-                <Label htmlFor="lastName">Last Name *</Label>
-                <Input
-                  id="lastName"
-                  value={newStaff.lastName}
-                  onChange={(e) => setNewStaff(prev => ({ ...prev, lastName: e.target.value }))}
-                  placeholder="Doe"
-                  disabled={loading}
-                />
-              </div>
+                <div>
+                  <StaffValidatedInput
+                    fieldName="lastName"
+                    label="Last Name"
+                    value={newStaff.lastName}
+                    onChange={(value) => {
+                      setNewStaff(prev => ({ ...prev, lastName: value }));
+                      handleFieldChange('lastName', value);
+                    }}
+                    onBlur={(value) => handleFieldBlur('lastName', value)}
+                    getFieldError={getFieldError}
+                    isFieldTouched={isFieldTouched}
+                    placeholder="Doe"
+                    disabled={loading}
+                    required={true}
+                  />
+                </div>
             </div>
-            
             <div>
-              <Label htmlFor="email">Email *</Label>
-              <Input
-                id="email"
-                type="email"
+              <StaffValidatedInput
+                fieldName="email"
+                label="Email"
                 value={newStaff.email}
-                onChange={(e) => setNewStaff(prev => ({ ...prev, email: e.target.value }))}
-                placeholder="john.doe@fitgym.com"
+                onChange={(value) => {
+                  setNewStaff(prev => ({ ...prev, email: value }));
+                  handleFieldChange('email', value);
+                }}
+                onBlur={(value) => handleFieldBlur('email', value)}
+                getFieldError={getFieldError}
+                isFieldTouched={isFieldTouched}
+                placeholder="john.doe@example.com"
+                type="email"
                 disabled={loading}
+                required={true}
               />
             </div>
             
             <div>
-              <Label htmlFor="phone">Phone (Optional)</Label>
-              <Input
-                id="phone"
+              <StaffValidatedInput
+                fieldName="phone"
+                label="Phone"
                 value={newStaff.phone}
-                onChange={(e) => setNewStaff(prev => ({ ...prev, phone: e.target.value }))}
-                placeholder="+1 (555) 123-4567"
+                onChange={(value) => {
+                  setNewStaff(prev => ({ ...prev, phone: value }));
+                  handleFieldChange('phone', value);
+                }}
+                onBlur={(value) => handleFieldBlur('phone', value)}
+                getFieldError={getFieldError}
+                isFieldTouched={isFieldTouched}
+                placeholder="+1 234 567 8900"
+                type="tel"
                 disabled={loading}
+                required={true}
               />
             </div>
             
@@ -533,19 +754,24 @@ export const StaffManagement = ({ staff, branchId, onStaffUpdate }: StaffManagem
             </div>
             
             <div>
-              <Label htmlFor="pin">4-Digit PIN *</Label>
-              <Input
-                id="pin"
+              <StaffValidatedInput
+                fieldName="pin"
+                label="4-Digit PIN"
+                value={newStaff.pin}
+                onChange={(value) => {
+                  const numericValue = value.replace(/\D/g, '');
+                  setNewStaff(prev => ({ ...prev, pin: numericValue }));
+                  handleFieldChange('pin', numericValue);
+                }}
+                onBlur={(value) => handleFieldBlur('pin', value)}
+                getFieldError={getFieldError}
+                isFieldTouched={isFieldTouched}
+                placeholder="1234"
                 type="password"
                 maxLength={4}
-                value={newStaff.pin}
-                onChange={(e) => setNewStaff(prev => ({ ...prev, pin: e.target.value.replace(/\D/g, '') }))}
-                placeholder="1234"
                 disabled={loading}
+                required={true}
               />
-              <p className="text-xs text-muted-foreground mt-1">
-                Must be exactly 4 digits
-              </p>
             </div>
             
             <div className="flex gap-2 pt-4">
@@ -559,7 +785,7 @@ export const StaffManagement = ({ staff, branchId, onStaffUpdate }: StaffManagem
               </Button>
               <Button 
                 onClick={handleAddStaff} 
-                disabled={loading} 
+                disabled={loading || !isFormValid()} 
                 className="flex-1"
               >
                 {loading ? (
