@@ -607,10 +607,57 @@ router.post('/process',
       console.log(`✅ Created ${renewalResults.length} renewal records successfully`);
 
       // ✅ Step 7: Update ALL members' expiry dates and status
+
+      // ✅ PHASE 2: Validate package data before member updates
+      console.log('🔍 Package data being applied to members:', {
+        packageId: packageId,
+        packageName: renewalPackage.name,
+        packagePrice: renewalPackage.price,
+        packageType: renewalPackage.type,
+        totalMembers: allMemberIds.length
+      });
+
+      // Validate package data exists
+      if (!packageId || !renewalPackage.name || !renewalPackage.price || !renewalPackage.type) {
+        console.error('❌ Incomplete package data for member update');
+        return res.status(400).json({
+          status: 'error',
+          error: 'Incomplete package data - renewal cannot proceed',
+          packageData: {
+            hasPackageId: !!packageId,
+            hasPackageName: !!renewalPackage.name,
+            hasPackagePrice: !!renewalPackage.price,
+            hasPackageType: !!renewalPackage.type
+          }
+        });
+      }
+
+      console.log('✅ Package data validation passed - proceeding with member updates');
+
+      // ✅ Step 7: Update ALL members' expiry dates and status
+
       const memberUpdatePromises = allMemberIds.map(memberIdToUpdate => {
+
+        // ✅ DEBUG: Check package data
+        console.log('🐛 PACKAGE DEBUG:', {
+          packageId: packageId,
+          renewalPackageRaw: renewalPackage,
+          packageName: renewalPackage?.name,
+          packagePrice: renewalPackage?.price,
+          packageType: renewalPackage?.type,
+          hasName: !!renewalPackage?.name,
+          hasPrice: !!renewalPackage?.price,
+          hasType: !!renewalPackage?.type
+        });
+
         const memberUpdateData = {
           expiry_date: newExpiryDate.toISOString().split('T')[0],
           status: 'active',
+          // ✅ ADD THESE MISSING PACKAGE FIELDS:
+          package_id: packageId,                    // Link to packages table
+          package_name: renewalPackage.name,        // Update package name
+          package_price: renewalPackage.price,      // Update package price
+          package_type: renewalPackage.type,        // Update package type
           updated_at: new Date().toISOString()
         };
 
@@ -645,7 +692,7 @@ router.post('/process',
             .insert({
               staff_id: staffId,
               action_type: 'MEMBER_RENEWAL',
-              description: `Renewed membership for ${memberData.first_name} ${memberData.last_name} - ${renewalPackage.name} for ${durationMonths} months${allMemberIds.length > 1 ? ` (Family renewal: ${allMemberIds.length} members)` : ''}`,
+              description: `Renewed membership for ${memberData.first_name} ${memberData.last_name} - Changed from "${member.package_name}" (${member.package_type}, $${member.package_price}) to "${renewalPackage.name}" (${renewalPackage.type}, $${renewalPackage.price}) for ${durationMonths} months${allMemberIds.length > 1 ? ` (Family renewal: ${allMemberIds.length} members)` : ''}`,
               member_id: memberData.id,
               created_at: new Date().toISOString()
             })
@@ -658,6 +705,16 @@ router.post('/process',
       }
 
       console.log('✅ Member renewal completed successfully');
+      console.log('📊 Renewal Summary:', {
+        membersUpdated: allMemberIds.length,
+        oldPackage: `${member.package_name} (${member.package_type})`,
+        newPackage: `${renewalPackage.name} (${renewalPackage.type})`,
+        priceChange: `$${member.package_price} → $${renewalPackage.price}`,
+        newExpiryDate: newExpiryDate.toISOString().split('T')[0],
+        processedBy: `${processStaff.first_name} ${processStaff.last_name}`,
+        totalAmount: parseFloat(amountPaid),
+        amountPerMember: amountPerMember
+      });
 
       res.json({
         status: 'success',

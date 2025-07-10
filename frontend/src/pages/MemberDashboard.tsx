@@ -156,7 +156,7 @@ const MemberDashboard = () => {
       console.log('📊 Fetching member data by ID:', memberIdToFetch);
       
       // Try direct API call for staff view
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/members/${memberIdToFetch}`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/members/${memberIdToFetch}?refresh=${Date.now()}`, {
         headers: {
           'Content-Type': 'application/json',
           ...getStaffAuthHeaders()
@@ -190,11 +190,11 @@ const MemberDashboard = () => {
       }
 
       // Fallback: Try direct Supabase query
-      console.log('🔄 API failed, trying direct Supabase query...');
       const { data: memberData, error: memberError } = await supabase
         .from('members')
         .select('*')
         .eq('id', memberIdToFetch)
+        .order('updated_at', { ascending: false })
         .single();
 
       if (!memberError && memberData) {
@@ -303,13 +303,14 @@ const MemberDashboard = () => {
       );
       console.log('🔐 Available auth keys:', authKeys);
       
-      // First, try to get member by user ID using API
-      console.log('🔄 Trying API lookup...');
-      let { data: memberData, error: memberError } = await db.members.getByUserId(userId);
-      
-      // If API fails, try direct Supabase query as fallback
-      if (memberError || !memberData) {
-        console.log('🔄 API lookup failed, trying direct Supabase query...');
+      // Skip API lookup - go straight to direct Supabase query
+      console.log('🔄 Using direct Supabase query (skipping API)...');
+      let memberData = null;
+      let memberError = { message: 'Skipping API - using direct query' };
+
+      // Always use direct Supabase query
+      if (true) { // Always use direct query instead of API
+        console.log('🔄 Using direct Supabase query...');
         if (memberError) {
           console.log('API Error:', memberError);
         }
@@ -439,14 +440,18 @@ const MemberDashboard = () => {
     }
   };
 
-  // ✅ MODIFIED: Updated refresh function to handle staff view
-  const refreshData = async () => {
-    console.log('🔄 Refreshing member dashboard data...');
+const refreshData = async () => {
+    console.log('🔄 Force refreshing member dashboard data...');
     
     setLoading(true);
     setAuthError('');
     
+    // ✅ FORCE REFRESH: Clear all cached data first
+    setMember(null);
+    setAnimatedStats({ daysRemaining: 0, price: 0, memberSince: 0 });
+    
     if (isStaffView && memberId) {
+      // ✅ FORCE REFRESH: Add cache-busting for staff view
       await fetchMemberDataById(memberId);
     } else {
       // Clear any stale session data
@@ -458,6 +463,42 @@ const MemberDashboard = () => {
       
       // Re-initialize everything
       await initializeDashboard();
+    }
+    
+    // ✅ SUCCESS FEEDBACK
+    toast({
+      title: "Data Refreshed",
+      description: "All membership information has been updated from the database.",
+    });
+  };
+
+  // ✅ PHASE 4: Enhanced refresh method for real-time updates
+  // ✅ PHASE 4: Enhanced refresh method for real-time updates
+  const refreshMemberData = async () => {
+    console.log('🔄 Refreshing member data only...');
+    
+    try {
+      // Clear any cached data first
+      setMember(null);
+      setAnimatedStats({ daysRemaining: 0, price: 0, memberSince: 0 });
+      
+      if (isStaffView && memberId) {
+        await fetchMemberDataById(memberId);
+      } else if (currentUser) {
+        await fetchMemberData(currentUser.id);
+      }
+      
+      toast({
+        title: "Data Refreshed",
+        description: "Membership information has been updated.",
+      });
+    } catch (error) {
+      console.error('❌ Error refreshing member data:', error);
+      toast({
+        title: "Refresh Failed",
+        description: "Could not refresh membership data. Please try again.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -657,7 +698,18 @@ const MemberDashboard = () => {
 
   // ✅ MODIFIED: Updated to handle staff view
   const handleMemberUpdate = (updatedMember: Member) => {
-    setMember(updatedMember);
+    // Force complete data refresh instead of just updating state
+    console.log('🔄 Member updated, forcing complete refresh...');
+    
+    // Clear current data to force fresh fetch
+    setMember(null);
+    setAnimatedStats({ daysRemaining: 0, price: 0, memberSince: 0 });
+    
+    // Refresh after a short delay
+    setTimeout(async () => {
+      await refreshMemberData();
+    }, 500);
+    
     if (!isStaffView) {
       toast({
         title: "Profile Updated",
