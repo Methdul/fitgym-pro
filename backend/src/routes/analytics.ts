@@ -113,7 +113,7 @@ async function fetchOptimizedAuditData(
       .from('audit_logs')
       .select('*')
       .eq('branch_id', branchId)
-      .in('action', ['CREATE_MEMBER']) // ✅ FIXED: Only get new members from audit_logs
+      .in('action', ['CREATE_MEMBER', 'DELETE_STAFF', 'CREATE_STAFF'])
       .eq('success', true)
       .gte('timestamp', start.toISOString())
       .lt('timestamp', end.toISOString())
@@ -1000,6 +1000,8 @@ function generateHumanReadableAction(action: string): string {
     'PROCESS_MEMBER_RENEWAL': 'Membership Renewal',
     'UPDATE_MEMBER': 'Member Update',
     'DELETE_MEMBER': 'Member Deletion',
+    'DELETE_STAFF': 'Staff Removal', 
+    'CREATE_STAFF': 'Staff Addition',       
     'CREATE_PACKAGE': 'Package Creation',
     'UPDATE_PACKAGE': 'Package Update',
     'DELETE_PACKAGE': 'Package Deletion',
@@ -1035,6 +1037,8 @@ function getActivityIcon(action: string): string {
     'PROCESS_MEMBER_RENEWAL': '🔄',
     'UPDATE_MEMBER': '✏️',
     'DELETE_MEMBER': '🗑️',
+    'DELETE_STAFF': '👤🗑️',  
+    'CREATE_STAFF': '👤➕',                
     'CREATE_PACKAGE': '📦',
     'UPDATE_PACKAGE': '📝',
     'DELETE_PACKAGE': '🗑️',
