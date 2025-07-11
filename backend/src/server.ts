@@ -152,7 +152,6 @@ const routes = [
   { path: './routes/branches', name: 'branchRoutes', endpoint: '/api/branches' },
   { path: './routes/renewals', name: 'renewalRoutes', endpoint: '/api/renewals' },
   { path: './routes/analytics', name: 'analyticsRoutes', endpoint: '/api/analytics' },
-  { path: './routes/debug', name: 'debugRoutes', endpoint: '/api/debug' }
 ];
 
 routes.forEach(({ path, name, endpoint }) => {
@@ -164,6 +163,18 @@ routes.forEach(({ path, name, endpoint }) => {
     }
   }
 });
+
+// 🔒 SECURITY FIX: Only load debug routes in development with explicit permission
+if (process.env.NODE_ENV === 'development' && process.env.ALLOW_DEBUG_ROUTES === 'true') {
+  console.log('⚠️ Loading debug routes (DEVELOPMENT ONLY)');
+  const debugRouter = loadRoute('./routes/debug', 'debugRoutes');
+  if (debugRouter) {
+    app.use('/api/debug', debugRouter);
+    console.log('  🐛 Debug routes loaded');
+  }
+} else {
+  console.log('🔒 Debug routes DISABLED (production mode)');
+}
 
 // Global error handler
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

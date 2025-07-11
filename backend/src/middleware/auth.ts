@@ -155,9 +155,9 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       }
     }
 
-    // ONLY allow bypass in development AND if explicitly enabled
-    if (true) {
-      console.log('⚠️ DEVELOPMENT BYPASS (acknowledged risk)');
+    // 🔒 SECURITY: Development bypass (DISABLED for production safety)
+    if (false) {
+      console.log('⚠️ DEVELOPMENT BYPASS (disabled for security)');
       req.user = { 
         id: 'dev_bypass', 
         email: 'dev@example.com', 

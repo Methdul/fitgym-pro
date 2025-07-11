@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
+import ConnectionStatus from '@/components/ConnectionStatus';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -37,6 +38,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { db, getAuthHeaders, setStaffSessionToken,getStaffSessionToken,isAuthenticated } from '@/lib/supabase';
+import { trackActivity } from '@/lib/api';
 import { AddNewMemberModal } from '@/components/staff/AddNewMemberModal';
 import { AddExistingMemberModal } from '@/components/staff/AddExistingMemberModal';
 import { ViewMemberModal } from '@/components/staff/ViewMemberModal';
@@ -227,6 +229,26 @@ const StaffDashboard = () => {
     setShowAuthModal(true);
     
   }, [branchId, location.state]);
+
+  // Track user activity for smart connection monitoring
+useEffect(() => {
+  const handleUserActivity = () => {
+    trackActivity(); // Track any user interaction
+  };
+
+  // Add event listeners for user interactions
+  const events = ['click', 'keydown', 'mousemove', 'scroll', 'touchstart'];
+  events.forEach(event => {
+    document.addEventListener(event, handleUserActivity, { passive: true });
+  });
+
+  // Cleanup event listeners
+  return () => {
+    events.forEach(event => {
+      document.removeEventListener(event, handleUserActivity);
+    });
+  };
+}, []);
 
   // Add this new function to create backend session for branch authentication
   const createBranchSession = async (sessionData: any) => {
@@ -1105,6 +1127,9 @@ const StaffDashboard = () => {
 
   return (
     <div className="min-h-screen p-6 bg-background">
+      {/* 🔄 Connection Status Indicator */}
+      <ConnectionStatus />
+      
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">

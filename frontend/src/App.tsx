@@ -4,6 +4,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
+import { startConnectionMonitoring } from "@/lib/api";
+import React from 'react';
 
 
 // Components
@@ -30,75 +32,83 @@ import MemberRoute from "@/components/auth/MemberRoute";
 
 const queryClient = new QueryClient();
 
-const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <AuthProvider>
-      <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <BrowserRouter>
-          <div className="min-h-screen bg-background">
-            <Navbar />
-            <Routes>
-              {/* 🌐 PUBLIC ROUTES (No Authentication Required) */}
-              <Route path="/" element={<Home />} />
-              <Route path="/about" element={<About />} />
-              <Route path="/branches" element={<Branches />} />
-              <Route path="/partnerships" element={<Partnerships />} />
-              <Route path="/login" element={<Login />} />
-              <Route path="/404" element={<NotFound />} />
-              <Route path="/test-pin" element={<TestPinVerification />} />
+const App = () => {
+  // Start connection monitoring when app loads
+  React.useEffect(() => {
+    console.log('🚀 Starting connection monitoring...');
+    startConnectionMonitoring();
+  }, []);
 
-              {/* 🔐 PROTECTED ROUTES (Temporary - work with your current auth) */}
-              
-              {/* Admin Dashboard */}
-              <Route 
-                path="/admin" 
-                element={
-                  <AdminRoute>
-                    <AdminDashboard />
-                  </AdminRoute>
-                } 
-              />
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <TooltipProvider>
+          <Toaster />
+          <Sonner />
+          <BrowserRouter>
+            <div className="min-h-screen bg-background">
+              <Navbar />
+              <Routes>
+                {/* 🌐 PUBLIC ROUTES (No Authentication Required) */}
+                <Route path="/" element={<Home />} />
+                <Route path="/about" element={<About />} />
+                <Route path="/branches" element={<Branches />} />
+                <Route path="/partnerships" element={<Partnerships />} />
+                <Route path="/login" element={<Login />} />
+                <Route path="/404" element={<NotFound />} />
+                <Route path="/test-pin" element={<TestPinVerification />} />
 
-              {/* Member Dashboard */}
-              <Route 
-                path="/member" 
-                element={
-                  <MemberRoute>
-                    <MemberDashboard />
-                  </MemberRoute>
-                } 
-              />
+                {/* 🔐 PROTECTED ROUTES (Temporary - work with your current auth) */}
+                
+                {/* Admin Dashboard */}
+                <Route 
+                  path="/admin" 
+                  element={
+                    <AdminRoute>
+                      <AdminDashboard />
+                    </AdminRoute>
+                  } 
+                />
 
-              {/* ✅ NEW: Member Dashboard for Staff View - Individual Member Access */}
-              <Route 
-                path="/member-dashboard/:memberId" 
-                element={
-                  <MemberRoute>
-                    <MemberDashboard />
-                  </MemberRoute>
-                } 
-              />
+                {/* Member Dashboard */}
+                <Route 
+                  path="/member" 
+                  element={
+                    <MemberRoute>
+                      <MemberDashboard />
+                    </MemberRoute>
+                  } 
+                />
 
-              {/* Staff Dashboard - Uses your existing branch auth */}
-              <Route 
-                path="/dashboard/staff/:branchId" 
-                element={
-                  <StaffRoute>
-                    <StaffDashboard />
-                  </StaffRoute>
-                } 
-              />
+                {/* ✅ NEW: Member Dashboard for Staff View - Individual Member Access */}
+                <Route 
+                  path="/member-dashboard/:memberId" 
+                  element={
+                    <MemberRoute>
+                      <MemberDashboard />
+                    </MemberRoute>
+                  } 
+                />
 
-              {/* 404 Fallback */}
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </div>
-        </BrowserRouter>
-      </TooltipProvider>
-    </AuthProvider>
-  </QueryClientProvider>
-);
+                {/* Staff Dashboard - Uses your existing branch auth */}
+                <Route 
+                  path="/dashboard/staff/:branchId" 
+                  element={
+                    <StaffRoute>
+                      <StaffDashboard />
+                    </StaffRoute>
+                  } 
+                />
+
+                {/* 404 Fallback */}
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </div>
+          </BrowserRouter>
+        </TooltipProvider>
+      </AuthProvider>
+    </QueryClientProvider>
+  );
+};
 
 export default App;

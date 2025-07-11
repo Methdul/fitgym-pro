@@ -57,9 +57,9 @@ export const staffAuth = async (req: Request, res: Response, next: NextFunction)
       }
     }
 
-    // Allow in development with bypass
-    if (process.env.NODE_ENV === 'development' && process.env.ALLOW_AUTH_BYPASS === 'true') {
-      console.log('⚠️ Auth bypassed in development mode');
+    // 🔒 SECURITY: Staff auth bypass (DISABLED for production safety)
+    if (false) {  // Temporarily disabled - use proper staff auth in production
+      console.log('⚠️ Staff auth bypassed in development mode (disabled for security)');
       return next();
     }
 
