@@ -13,6 +13,15 @@ let currentActivityLevel: 'high' | 'normal' | 'low' | 'idle' = 'normal';
 let connectionCheckInterval: ReturnType<typeof setInterval> | null = null;
 let isMonitoringActive = false;
 
+// 🔧 NEW: Add exponential backoff for failed connections
+let consecutiveFailures = 0;
+let isBackingOff = false;
+
+const getBackoffDelay = () => {
+  // Exponential backoff: 1s, 2s, 4s, 8s, 16s, max 30s
+  return Math.min(1000 * Math.pow(2, consecutiveFailures), 30000);
+};
+
 // Activity detection
 const updateActivity = () => {
   lastActivityTime = Date.now();
@@ -50,25 +59,31 @@ const updateMonitoringFrequency = () => {
   
   // Set new interval based on activity level
   let intervalMs;
+  
+  // 🔧 Much more conservative intervals to prevent IP blocking
   switch (currentActivityLevel) {
     case 'high':
-      intervalMs = 30 * 1000; // 30 seconds - staff actively working
-      console.log('📶 High activity: Checking connection every 30 seconds');
+      intervalMs = isBackingOff ? getBackoffDelay() : 2 * 60 * 1000; // 2 minutes instead of 30 seconds
+      console.log('📶 High activity: Checking connection every 2 minutes');
       break;
     case 'normal':
-      intervalMs = 2 * 60 * 1000; // 2 minutes - normal usage
-      console.log('📊 Normal activity: Checking connection every 2 minutes');
+      intervalMs = isBackingOff ? getBackoffDelay() : 5 * 60 * 1000; // 5 minutes instead of 2
+      console.log('📊 Normal activity: Checking connection every 5 minutes');
       break;
     case 'low':
-      intervalMs = 5 * 60 * 1000; // 5 minutes - low usage
-      console.log('📉 Low activity: Checking connection every 5 minutes');
+      intervalMs = isBackingOff ? getBackoffDelay() : 8 * 60 * 1000; // 8 minutes instead of 5
+      console.log('📉 Low activity: Checking connection every 8 minutes');
       break;
     case 'idle':
-      intervalMs = 10 * 60 * 1000; // 10 minutes - idle
-      console.log('😴 Idle: Checking connection every 10 minutes');
+      intervalMs = isBackingOff ? getBackoffDelay() : 15 * 60 * 1000; // 15 minutes instead of 10
+      console.log('😴 Idle: Checking connection every 15 minutes');
       break;
     default:
-      intervalMs = 2 * 60 * 1000;
+      intervalMs = 5 * 60 * 1000;
+  }
+  
+  if (isBackingOff) {
+    console.log(`⏰ Backing off: Next check in ${intervalMs / 1000} seconds`);
   }
   
   // Start new interval
@@ -100,7 +115,7 @@ const notifyConnectionChange = (online: boolean) => {
   }
 };
 
-// Check internet connection (simplified and reliable)
+// Check internet connection (enhanced with backoff logic)
 const checkConnection = async (): Promise<boolean> => {
   try {
     console.log('🔍 Testing connection...');
@@ -110,52 +125,56 @@ const checkConnection = async (): Promise<boolean> => {
       const response = await fetch(`${API_BASE_URL}/branches`, {
         method: 'GET',
         cache: 'no-cache',
-        signal: AbortSignal.timeout(5000)
+        signal: AbortSignal.timeout(10000) // Increased timeout
       });
       
-      // Any response (even 401) means server is reachable
+      // Any response (even 401/403) means server is reachable
       if (response.status < 500) {
         console.log(`✅ Backend reachable (status: ${response.status})`);
+        
+        // 🔧 Reset failure count on success
+        consecutiveFailures = 0;
+        isBackingOff = false;
+        
         return true;
       }
     } catch (error) {
       console.log('❌ Backend test failed:', error instanceof Error ? error.message : 'Unknown error');
-    }
-
-    // Test 2: Try Google's reliable endpoint (most reliable internet test)
-    try {
-      const response = await fetch('https://www.google.com/generate_204', {
-        method: 'GET',
-        mode: 'no-cors',
-        cache: 'no-cache',
-        signal: AbortSignal.timeout(5000)
-      });
-      console.log('✅ Internet connectivity confirmed via Google');
-      return true;
-    } catch (error) {
-      console.log('❌ Google test failed:', error instanceof Error ? error.message : 'Unknown error');
-    }
-
-    // Test 3: Try a simple CORS-friendly endpoint
-    try {
-      const response = await fetch('https://httpbin.org/get', {
-        method: 'GET',
-        cache: 'no-cache',
-        signal: AbortSignal.timeout(5000)
-      });
       
-      if (response.ok) {
-        console.log('✅ Internet connectivity confirmed via httpbin');
-        return true;
+      // 🔧 Increment failure count
+      consecutiveFailures++;
+      isBackingOff = true;
+      
+      // Don't spam with more requests if backend is blocking us
+      if (error instanceof Error && error.message.includes('blocked')) {
+        console.log('🚫 Backend is blocking requests - entering extended backoff');
+        consecutiveFailures = Math.max(consecutiveFailures, 5); // Force longer backoff
       }
-    } catch (error) {
-      console.log('❌ Httpbin test failed:', error instanceof Error ? error.message : 'Unknown error');
     }
 
-    console.log('🔴 All connectivity tests failed - no internet');
+    // Test 2: Only try external services if backend fails
+    // (Skip if we're being blocked to avoid further issues)
+    if (!isBackingOff || consecutiveFailures < 3) {
+      try {
+        const response = await fetch('https://www.google.com/generate_204', {
+          method: 'GET',
+          mode: 'no-cors',
+          cache: 'no-cache',
+          signal: AbortSignal.timeout(5000)
+        });
+        console.log('✅ Internet connectivity confirmed via Google');
+        return true;
+      } catch (error) {
+        console.log('❌ Google test failed:', error instanceof Error ? error.message : 'Unknown error');
+      }
+    }
+
+    console.log(`🔴 All connectivity tests failed (${consecutiveFailures} consecutive failures)`);
     return false;
     
   } catch (error) {
+    consecutiveFailures++;
+    isBackingOff = true;
     console.log('🔴 Connection check error:', error instanceof Error ? error.message : 'Unknown error');
     return false;
   }

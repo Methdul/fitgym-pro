@@ -325,8 +325,18 @@ export const securityHeaders = (req: Request, res: Response, next: NextFunction)
 const blockedIPs = new Set<string>();
 const suspiciousIPs = new Map<string, { count: number; lastSeen: number }>();
 
+// In backend/src/middleware/validation.ts
+// Replace the existing ipProtection function with this improved version:
+
 export const ipProtection = (req: Request, res: Response, next: NextFunction) => {
   const clientIP = req.ip || req.connection.remoteAddress || 'unknown';
+  const isDevelopment = process.env.NODE_ENV === 'development';
+  
+  // 🔧 Skip protection for localhost in development
+  if (isDevelopment && (clientIP === '127.0.0.1' || clientIP === '::1' || clientIP === '::ffff:127.0.0.1')) {
+    console.log(`🔧 DEV MODE: Skipping IP protection for localhost: ${clientIP}`);
+    return next();
+  }
   
   // Check if IP is blocked
   if (blockedIPs.has(clientIP)) {
@@ -334,7 +344,12 @@ export const ipProtection = (req: Request, res: Response, next: NextFunction) =>
     return res.status(403).json({
       status: 'error',
       error: 'Access denied',
-      message: 'Your IP address has been blocked'
+      message: 'Your IP address has been blocked',
+      // 🔧 Development helper
+      ...(isDevelopment && { 
+        hint: 'Restart backend server to clear IP blocks in development',
+        blockedCount: blockedIPs.size 
+      })
     });
   }
   
@@ -351,10 +366,22 @@ export const ipProtection = (req: Request, res: Response, next: NextFunction) =>
   suspicious.lastSeen = now;
   suspiciousIPs.set(clientIP, suspicious);
   
+  // 🔧 Higher threshold for development
+  const threshold = isDevelopment ? 5000 : 1000;
+  
   // Block IP if too many requests
-  if (suspicious.count > 1000) {
+  if (suspicious.count > threshold) {
     blockedIPs.add(clientIP);
-    console.log(`🚨 IP blocked for suspicious activity: ${clientIP}`);
+    console.log(`🚨 IP blocked for suspicious activity: ${clientIP} (${suspicious.count} requests)`);
+    
+    // 🔧 Auto-unblock in development after 5 minutes
+    if (isDevelopment) {
+      setTimeout(() => {
+        blockedIPs.delete(clientIP);
+        suspiciousIPs.delete(clientIP);
+        console.log(`🔓 Auto-unblocked development IP: ${clientIP}`);
+      }, 5 * 60 * 1000); // 5 minutes
+    }
   }
   
   next();
