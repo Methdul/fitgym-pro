@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Utensils, ShoppingBag, Heart, Car, ExternalLink, Gift, Star, Percent } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { db } from '@/lib/supabase';
 import type { Partnership } from '@/types';
 
@@ -243,37 +244,34 @@ const Partnerships = () => {
           </section>
         )}
 
-        {/* Call to Action */}
-        {partnerships.length > 0 && (
-          <section className="py-20">
-            <Card className="gym-card-gradient border-primary relative overflow-hidden group">
-              <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-blue-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-700"></div>
-              
-              <CardContent className="p-12 text-center relative z-10">
-                <div className="mb-6">
-                  <div className="inline-flex items-center space-x-2 bg-primary/10 px-4 py-2 rounded-full mb-4">
-                    <Gift className="h-4 w-4 text-primary" />
-                    <span className="text-primary font-semibold">Member Exclusive</span>
-                  </div>
+        {/* Partner with Us Section */}
+        <section className="py-20">
+          <Card className="gym-card-gradient border-primary relative overflow-hidden group">
+            <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-blue-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-700"></div>
+            
+            <CardContent className="p-12 text-center relative z-10">
+              <div className="mb-6">
+                <div className="inline-flex items-center space-x-2 bg-primary/10 px-4 py-2 rounded-full mb-4">
+                  <Heart className="h-4 w-4 text-primary" />
+                  <span className="text-primary font-semibold">Business Partnership</span>
                 </div>
-                <h2 className="text-3xl md:text-4xl font-bold mb-6 group-hover:text-primary transition-colors duration-300">
-                  Ready to Save More?
-                </h2>
-                <p className="text-xl text-muted-foreground mb-8 group-hover:text-foreground transition-colors duration-300">
-                  Join FitGym Pro today and unlock exclusive discounts from our premium partners.
-                </p>
-                <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                  <Button size="lg" className="transform hover:scale-105 transition-all duration-300">
-                    Join Now
-                  </Button>
-                  <Button size="lg" variant="outline" className="transform hover:scale-105 transition-all duration-300">
-                    Learn More
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </section>
-        )}
+              </div>
+              <h2 className="text-3xl md:text-4xl font-bold mb-6 group-hover:text-primary transition-colors duration-300">
+                Want to Partner with FitGym Pro?
+              </h2>
+              <p className="text-xl text-muted-foreground mb-8 group-hover:text-foreground transition-colors duration-300">
+                Join our growing network of premium partners and offer exclusive benefits to our members while growing your business.
+              </p>
+              <div className="flex justify-center">
+                <Button size="lg" asChild className="transform hover:scale-105 transition-all duration-300">
+                  <Link to="/about">
+                    Contact Us
+                  </Link>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </section>
       </div>
 
       {/* Custom CSS for animations */}

@@ -329,8 +329,8 @@ const Login = () => {
             <div className="text-center space-y-4">
               <div className="text-sm text-muted-foreground">
                 Don't have an account?{' '}
-                <Link to="/signup" className="text-primary hover:underline font-medium">
-                  Contact Admin
+                <Link to="/about#team" className="text-primary hover:underline font-medium">
+                  Contact
                 </Link>
               </div>
               
