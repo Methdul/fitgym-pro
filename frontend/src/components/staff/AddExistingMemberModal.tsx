@@ -28,6 +28,8 @@ import { db, getAuthHeaders } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
 import type { Package as PackageType, BranchStaff } from '@/types';
 
+
+
 interface AddExistingMemberModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -49,12 +51,31 @@ interface MemberFormData {
   previousMembershipDate: string;
 }
 
+// Helper function to format package pricing display - COPIED FROM AddNewMemberModal
+const formatPackagePrice = (pkg: PackageType): string => {
+  const durationType = pkg.duration_type || 'months';
+  const durationValue = pkg.duration_value || pkg.duration_months || 1;
+  
+  let unit = '';
+  if (durationType === 'days') {
+    unit = durationValue === 1 ? 'day' : 'days';
+  } else if (durationType === 'weeks') {
+    unit = durationValue === 1 ? 'week' : 'weeks';
+  } else {
+    unit = durationValue === 1 ? 'month' : 'months';
+  }
+  
+  return `$${pkg.price}/${durationValue === 1 ? unit : `${durationValue} ${unit}`}`;
+};
+
 export const AddExistingMemberModal = ({ 
   open, 
   onOpenChange, 
   branchId, 
   onMemberAdded 
 }: AddExistingMemberModalProps) => {
+
+
   // State management
   const [currentStep, setCurrentStep] = useState<Step>('package');
   const [loading, setLoading] = useState(false);
@@ -154,7 +175,8 @@ export const AddExistingMemberModal = ({
   // Calculate pricing
   const calculatePrice = () => {
     if (!selectedPackage) return 0;
-    return selectedPackage.price * duration;
+    // Package price is already the total price for the package duration
+    return selectedPackage.price;
   };
 
   const getTotalPrice = () => {
@@ -165,9 +187,24 @@ export const AddExistingMemberModal = ({
 
   // Calculate expiry date correctly (from start date + duration)
   const calculateExpiryDate = () => {
+    if (!selectedPackage) return 'Select package first';
+    
     const start = new Date(startDate);
     const expiry = new Date(start);
-    expiry.setMonth(expiry.getMonth() + duration);
+    
+    // Use package duration settings - same logic as AddNewMemberModal
+    const durationValue = selectedPackage.duration_value || selectedPackage.duration_months || 1;
+    const durationType = selectedPackage.duration_type || 'months';
+    
+    if (durationType === 'days') {
+      expiry.setDate(expiry.getDate() + durationValue);
+    } else if (durationType === 'weeks') {
+      expiry.setDate(expiry.getDate() + (durationValue * 7));
+    } else {
+      // months
+      expiry.setMonth(expiry.getMonth() + durationValue);
+    }
+    
     return expiry.toLocaleDateString();
   };
 
@@ -221,10 +258,21 @@ export const AddExistingMemberModal = ({
           continue;
         }
 
-        // Calculate expiry date from start date + duration
+        // Calculate expiry date from start date + package duration - same logic as AddNewMemberModal
         const startDateObj = new Date(startDate);
         const expiryDateObj = new Date(startDateObj);
-        expiryDateObj.setMonth(expiryDateObj.getMonth() + duration);
+
+        // Use package duration settings
+        const durationValue = selectedPackage.duration_value || selectedPackage.duration_months || 1;
+        const durationType = selectedPackage.duration_type || 'months';
+
+        if (durationType === 'days') {
+          expiryDateObj.setDate(expiryDateObj.getDate() + durationValue);
+        } else if (durationType === 'weeks') {
+          expiryDateObj.setDate(expiryDateObj.getDate() + (durationValue * 7));
+        } else {
+          expiryDateObj.setMonth(expiryDateObj.getMonth() + durationValue);
+        }
 
         const memberData = {
           // Personal information
@@ -248,7 +296,10 @@ export const AddExistingMemberModal = ({
           // Payment information (only charge full price for first member)
           amountPaid: i === 0 ? getTotalPrice() : 0, // Only first member pays, others are included
           paymentMethod: paymentMethod,
-          durationMonths: duration,
+          // Send the actual package duration info to backend
+          durationMonths: selectedPackage.duration_type === 'months' ? (selectedPackage.duration_value || selectedPackage.duration_months || 1) : 
+               selectedPackage.duration_type === 'weeks' ? Math.ceil((selectedPackage.duration_value || 1) * 7 / 30) :
+               Math.ceil((selectedPackage.duration_value || 1) / 30), // convert days to approximate months for backend
           
           // Staff verification
           staffId: verification.staffId,
@@ -262,6 +313,12 @@ export const AddExistingMemberModal = ({
         };
 
         console.log(`Creating existing member ${i + 1}:`, memberData);
+
+        console.log('🔍 DEBUG EXISTING MEMBER REQUEST:', {
+          url: `${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/members`,
+          headers: getAuthHeaders(),
+          memberData: memberData
+        });
 
         const response = await fetch(
           `${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/members`,
@@ -419,7 +476,7 @@ export const AddExistingMemberModal = ({
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-sm text-muted-foreground">Price</span>
-                        <span className="font-semibold">${pkg.price}/month</span>
+                        <span className="font-semibold">{formatPackagePrice(pkg)}</span>
                       </div>
                       <div className="text-xs text-muted-foreground">
                         <ul className="space-y-1">
@@ -674,19 +731,17 @@ export const AddExistingMemberModal = ({
               </div>
 
               <div>
-                <Label htmlFor="duration">Duration (months) *</Label>
-                <Select value={duration.toString()} onValueChange={(value) => setDuration(parseInt(value))}>
-                  <SelectTrigger className="mt-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {[1, 2, 3, 6, 12].map((months) => (
-                      <SelectItem key={months} value={months.toString()}>
-                        {months} month{months > 1 ? 's' : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label>Package Duration</Label>
+                <div className="mt-1 p-3 bg-muted border border-border rounded-lg">
+                  <span className="text-foreground font-medium">
+                    {selectedPackage?.duration_value || selectedPackage?.duration_months || 1} {
+                      selectedPackage?.duration_type === 'days' ? 'day' + ((selectedPackage?.duration_value || 1) > 1 ? 's' : '') :
+                      selectedPackage?.duration_type === 'weeks' ? 'week' + ((selectedPackage?.duration_value || 1) > 1 ? 's' : '') :
+                      'month' + ((selectedPackage?.duration_value || selectedPackage?.duration_months || 1) > 1 ? 's' : '')
+                    }
+                  </span>
+                  <p className="text-xs text-muted-foreground mt-1">Duration is set by the selected package</p>
+                </div>
               </div>
 
               <div className="md:col-span-2">
@@ -707,8 +762,12 @@ export const AddExistingMemberModal = ({
 
             <div className="space-y-4">
               <div className="flex items-center justify-between text-sm">
-                <span>Package Price ({duration} month{duration > 1 ? 's' : ''})</span>
-                <span>${calculatedPrice.toFixed(2)}</span>
+                <span>Package Price ({selectedPackage?.duration_value || selectedPackage?.duration_months || 1} {
+                  selectedPackage?.duration_type === 'days' ? 'day' + ((selectedPackage?.duration_value || 1) > 1 ? 's' : '') :
+                  selectedPackage?.duration_type === 'weeks' ? 'week' + ((selectedPackage?.duration_value || 1) > 1 ? 's' : '') :
+                  'month' + ((selectedPackage?.duration_value || selectedPackage?.duration_months || 1) > 1 ? 's' : '')
+                })</span>
+                <span>{selectedPackage ? formatPackagePrice(selectedPackage) : '$0'}</span>
               </div>
 
               <div>

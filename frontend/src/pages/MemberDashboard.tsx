@@ -73,6 +73,65 @@ const MemberDashboard = () => {
     return () => clearTimeout(initTimer);
   }, [memberId, isStaffView]); // ✅ ADDED: Dependencies for staff view
 
+  // Listen for auth changes (email verification completion)
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('🔐 Auth state change:', event, session?.user?.email);
+        
+        if (event === 'USER_UPDATED' && session?.user) {
+          const newEmail = session.user.email;
+          const oldEmail = currentUser?.email;
+          
+          // Check if email actually changed and is different
+          if (newEmail && oldEmail && newEmail !== oldEmail) {
+            console.log('📧 Email verification completed:', oldEmail, '→', newEmail);
+            
+            // NOW update database tables to match the verified auth email
+            try {
+              if (member) {
+                console.log('🔄 Updating database with verified email...');
+                
+                // Update member table
+                const { error: memberError } = await supabase
+                  .from('members')
+                  .update({ email: newEmail })
+                  .eq('id', member.id);
+                
+                if (!memberError) {
+                  console.log('✅ Updated member email after verification');
+                }
+
+                // Update users table
+                const { error: userError } = await supabase
+                  .from('users')
+                  .update({ email: newEmail })
+                  .eq('auth_user_id', session.user.id);
+                
+                if (!userError) {
+                  console.log('✅ Updated user email after verification');
+                }
+
+                // Update local state
+                setMember(prev => prev ? { ...prev, email: newEmail } : null);
+                setCurrentUser(session.user);
+
+                toast({
+                  title: "Email Updated Successfully! ✅",
+                  description: `Your email has been changed to ${newEmail} and is now active for login.`,
+                });
+              }
+            } catch (error) {
+              console.error('❌ Error updating database after verification:', error);
+            }
+          }
+        }
+      }
+    );
+
+    return () => subscription.unsubscribe();
+  }, [member, currentUser]);
+
   // ✅ MODIFIED: Updated initialization to handle both regular and staff view
   const initializeDashboard = async () => {
     try {
@@ -364,6 +423,64 @@ const MemberDashboard = () => {
           console.error('❌ Direct Supabase query failed:', directError);
         }
       }
+
+      // ✅ REPAIR: Handle existing split-brain email cases
+      // First, get userEmail from the current context
+      const userEmail = currentUser?.email || 'Unknown email';
+
+      if (!memberData && userEmail && userEmail !== 'Unknown email') {
+        console.log('🔧 Attempting to repair split-brain email case...');
+        
+        try {
+          // Try to find member by checking various combinations
+          const { data: potentialMembers } = await supabase
+            .from('members')
+            .select('*')
+            .or(`email.ilike.${userEmail},user_id.eq.${userId}`);
+          
+          if (potentialMembers && potentialMembers.length > 0) {
+            const memberToRepair = potentialMembers[0];
+            console.log('🔧 Found member to repair:', memberToRepair.email, '(auth email:', userEmail, ')');
+            
+            // If emails don't match, fix the member email to match auth
+            if (memberToRepair.email !== userEmail) {
+              console.log('🔧 Repairing member email to match auth...');
+              const { error: repairError } = await supabase
+                .from('members')
+                .update({ 
+                  email: userEmail,
+                  user_id: userId 
+                })
+                .eq('id', memberToRepair.id);
+              
+              if (!repairError) {
+                memberData = { ...memberToRepair, email: userEmail, user_id: userId };
+                console.log('✅ Repair successful - member email synchronized');
+                
+                toast({
+                  title: "Account Synchronized",
+                  description: "Your account has been automatically synchronized.",
+                });
+              }
+            } else {
+              memberData = memberToRepair;
+              console.log('✅ Found member via repair lookup');
+            }
+          }
+        } catch (repairError) {
+          console.log('⚠️ Repair attempt failed:', repairError);
+        }
+      }
+
+      if (!memberData) {
+        console.log('❌ No member record found for user:', userId, 'or email:', userEmail);
+        
+        setAuthError(
+          `No membership found for your account (${userEmail}). This could mean your membership hasn't been set up yet, your account needs to be linked to your membership, or there's a data synchronization issue. Please contact support to resolve this issue.`
+        );
+        setLoading(false);
+        return;
+      }
       
       if (!memberData) {
         const userEmail = currentUser?.email || 'Unknown email';
@@ -525,9 +642,9 @@ const refreshData = async () => {
     setEmailForm(prev => ({ ...prev, isChanging: true }));
 
     try {
-      console.log('📧 Updating email from', currentUser?.email, 'to', emailForm.newEmail);
+      console.log('📧 Starting SAFE email update from', currentUser?.email, 'to', emailForm.newEmail);
       
-      // Update email in Supabase Auth
+      // ✅ STEP 1: Send verification email ONLY (do not update database yet)
       const { data, error } = await supabase.auth.updateUser({
         email: emailForm.newEmail
       });
@@ -536,54 +653,22 @@ const refreshData = async () => {
         throw error;
       }
 
-      // ✅ ENHANCED: Update email in ALL related tables
-      if (member) {
-        try {
-          // Update member table
-          const { error: memberError } = await supabase
-            .from('members')
-            .update({ email: emailForm.newEmail })
-            .eq('id', member.id);
-          
-          if (memberError) {
-            console.warn('⚠️ Could not update member email:', memberError);
-          } else {
-            console.log('✅ Updated member email');
-          }
+      console.log('✅ Verification email sent - database will update after verification');
 
-          // Update users table if exists
-          const { error: userError } = await supabase
-            .from('users')
-            .update({ email: emailForm.newEmail })
-            .eq('auth_user_id', currentUser?.id);
-          
-          if (userError) {
-            console.warn('⚠️ Could not update user email:', userError);
-          } else {
-            console.log('✅ Updated user email');
-          }
-
-          // Update any other related tables as needed
-          // Add more table updates here if your schema requires it
-          
-          // Update local member state
-          setMember(prev => prev ? { ...prev, email: emailForm.newEmail } : null);
-        } catch (updateError) {
-          console.warn('⚠️ Could not update related tables:', updateError);
-        }
-      }
-
+      // ✅ STEP 2: Show verification-pending message (no database updates)
       toast({
-        title: "Email Update Initiated",
-        description: `A verification email has been sent to ${emailForm.newEmail}. Please check your inbox and click the verification link to complete the change. Your email will be updated in all systems once verified.`,
+        title: "Email Verification Required",
+        description: `Please check your inbox at ${emailForm.newEmail} and click the verification link. Your account will be updated automatically after verification.`,
       });
 
-      // Clear form
+      // ✅ STEP 3: Clear form but don't update database or local state yet
       setEmailForm({
         newEmail: '',
         confirmEmail: '',
         isChanging: false
       });
+
+      // Note: Database updates will happen automatically when verification completes
 
     } catch (error) {
       console.error('❌ Email change error:', error);

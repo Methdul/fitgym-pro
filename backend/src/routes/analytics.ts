@@ -212,10 +212,15 @@ function getOptimizedRevenue(
   let newMemberRevenue = 0;
   let upgrades = 0;
 
-  // Process new member revenue from audit logs
+  // Process new member revenue from audit logs (EXCLUDE existing members)
   auditLogs.forEach(log => {
     if (log.action === 'CREATE_MEMBER') {
       const requestData = log.request_data?.body || {};
+      
+      // Skip existing members - they don't count towards revenue
+      if (requestData.isExistingMember) {
+        return;
+      }
       
       let amount = 0;
       if (requestData.package_price) {
@@ -246,8 +251,16 @@ function getOptimizedRevenue(
   });
 
   // Calculate previous period revenue
+  // Calculate previous period revenue (also exclude existing members)
   const previousNewMemberRevenue = previousPeriodLogs.reduce((sum, log) => {
-    const amount = parseFloat(log.request_data?.body?.package_price || log.request_data?.body?.amount_paid || 0);
+    const requestData = log.request_data?.body || {};
+    
+    // Skip existing members from previous period too
+    if (requestData.isExistingMember) {
+      return sum;
+    }
+    
+    const amount = parseFloat(requestData.package_price || requestData.amount_paid || 0);
     return sum + amount;
   }, 0);
 
@@ -323,7 +336,7 @@ function getOptimizedTransactions(auditData: OptimizedAuditData): Transaction[] 
         id: log.id,
         date: log.timestamp,
         memberName: memberName,
-        type: 'New Membership',
+        type: requestData.isExistingMember ? 'Existing Member' : 'New Membership',
         packageName: packageName,
         amount: amount,
         paymentMethod: paymentMethod,

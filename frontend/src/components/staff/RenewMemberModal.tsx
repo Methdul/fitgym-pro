@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
@@ -51,6 +51,7 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
   const [duration, setDuration] = useState<number>(1);
   const [customPrice, setCustomPrice] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card'>('cash');
+  const [renewalStartDate, setRenewalStartDate] = useState<'expiry' | 'today'>('expiry');
   const [verification, setVerification] = useState({ staffId: '', pin: '' });
   const [loading, setLoading] = useState(false);
   const [loadingPackages, setLoadingPackages] = useState(false);
@@ -78,7 +79,13 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
   const validateSummary = (): boolean => {
     const priceValid = duration > 0 && parseFloat(customPrice || '0') > 0;
     const paymentValid = (paymentMethod === 'cash' || paymentMethod === 'card');
-    return priceValid && paymentValid;
+    
+    // For multi-member packages, require full occupancy
+    const memberCountValid = selectedPackage ? 
+      (selectedPackage.max_members === 1 || 
+      selectedAdditionalMembers.length === (selectedPackage.max_members - 1)) : true;
+    
+    return priceValid && paymentValid && memberCountValid;
   };
 
   useEffect(() => {
@@ -265,6 +272,7 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
         durationMonths: selectedPackage.duration_value || selectedPackage.duration_months || 1,
         amountPaid: parseFloat(customPrice),
         paymentMethod,
+        renewalStartDate: renewalStartDate, 
         staffId: verification.staffId,
         staffPin: verification.pin
       };
@@ -330,6 +338,7 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
     setDuration(1);
     setCustomPrice('');
     setPaymentMethod('cash');
+    setRenewalStartDate('expiry');
     setVerification({ staffId: '', pin: '' });
     setSelectedAdditionalMembers([]);
     setExistingMembers([]);
@@ -549,6 +558,143 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
               </CardContent>
             </Card>
 
+            {/* Additional Members Section for Couple/Family packages */}
+            {selectedPackage && selectedPackage.max_members > 1 && (
+              <Card className="gym-card-gradient border-border">
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2 text-foreground">
+                    <Users className="h-4 w-4" />
+                    Additional Members
+                    <Badge variant={selectedAdditionalMembers.length === (selectedPackage.max_members - 1) ? "default" : "destructive"}>
+                      {selectedAdditionalMembers.length}/{selectedPackage.max_members - 1} 
+                      {selectedAdditionalMembers.length === (selectedPackage.max_members - 1) ? "  COMPLETE" : " REQUIRED"}
+                    </Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    This package requires exactly {selectedPackage.max_members} members. 
+                    You must add exactly {selectedPackage.max_members - 1} additional member{selectedPackage.max_members - 1 !== 1 ? 's' : ''} to proceed with renewal.
+                  </p>
+
+                  {/* Show Selected Additional Members */}
+                  {selectedAdditionalMembers.length > 0 && (
+                    <div className="space-y-3">
+                      <Label className="text-sm font-medium text-foreground">Selected Additional Members:</Label>
+                      <div className="space-y-3">
+                        {selectedAdditionalMembers.map((additionalMember) => (
+                          <div key={additionalMember.id} className="relative p-4 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg transition-all hover:shadow-sm">
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1 space-y-2">
+                                {/* Member Info */}
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <div className="p-1.5 bg-gray-100 dark:bg-gray-700 rounded-full">
+                                      <User className="h-3 w-3 text-blue-600 dark:text-blue-400" />
+                                    </div>
+                                    <div>
+                                      <p className="font-semibold text-blue-900 dark:text-blue-100">
+                                        {additionalMember.first_name} {additionalMember.last_name}
+                                      </p>
+                                      <p className="text-sm text-blue-700 dark:text-blue-300">
+                                        {additionalMember.email}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Status Info */}
+                                <div className="flex items-center gap-4 text-xs">
+                                  <div className="flex items-center gap-1">
+                                    <div className="w-2 h-2 rounded-full bg-red-500" />
+                                    <span className="text-blue-600 dark:text-blue-400 font-medium">
+                                      Expired
+                                    </span>
+                                  </div>
+                                  <span className="text-blue-600 dark:text-blue-400">
+                                    Expired: {new Date(additionalMember.expiry_date).toLocaleDateString()}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Remove Button */}
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => removeAdditionalMember(additionalMember.id)}
+                                className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
+                                title="Remove member"
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+
+                            {/* Bottom border accent */}
+                            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-400 to-blue-600 rounded-b-lg" />
+                          </div>
+                        ))}
+                      </div>
+                      <Separator className="bg-border/50" />
+                    </div>
+                  )}
+
+                  {/* Search for additional members */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Search className="h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder={
+                          selectedAdditionalMembers.length >= (selectedPackage.max_members - 1) 
+                            ? "Maximum members reached" 
+                            : "Search for expired members to add..."
+                        }
+                        value={existingMemberSearch}
+                        onChange={(e) => setExistingMemberSearch(e.target.value)}
+                        disabled={selectedAdditionalMembers.length >= (selectedPackage.max_members - 1)}
+                        className="flex-1 bg-background border-border"
+                      />
+                    </div>
+                    
+                    {/* Show filtered expired members */}
+                    <div className="max-h-40 overflow-y-auto space-y-2">
+                      {existingMemberSearch && (
+                        getFilteredMembers().slice(0, 5).map((member) => {
+                          const memberStatus = getMemberStatus(member);
+                          return (
+                            <div key={member.id} className="flex items-center justify-between p-3 bg-gray-800 border border-gray-600 rounded cursor-pointer hover:border-primary/50 hover:bg-gray-700">
+                              <div className="flex-1">
+                                <p className="font-medium text-gray-100">{member.first_name} {member.last_name}</p>
+                                <p className="text-xs text-gray-300">{member.email}</p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Badge 
+                                  variant="outline" 
+                                  className={`text-xs ${
+                                    memberStatus.color === 'red' ? 'border-red-300 text-red-800' : 'border-border'
+                                  }`}
+                                >
+                                  {memberStatus.status}
+                                </Badge>
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  className="h-8 px-3"
+                                  onClick={() => addAdditionalMember(member)}
+                                >
+                                  Add
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Member Summary */}
             <Card className="gym-card-gradient border-border">
               <CardHeader>
@@ -620,110 +766,62 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
               </CardContent>
             </Card>
 
-            {/* Additional Members Section for Couple/Family packages */}
-            {selectedPackage && selectedPackage.max_members > 1 && (
+            {/* Renewal Start Date Section - ONLY for Individual packages */}
+            {selectedPackage && selectedPackage.max_members === 1 && (
               <Card className="gym-card-gradient border-border">
                 <CardHeader>
                   <CardTitle className="text-base flex items-center gap-2 text-foreground">
-                    <Users className="h-4 w-4" />
-                    Additional Members
-                    <Badge variant={selectedAdditionalMembers.length >= (selectedPackage.max_members - 1) ? "destructive" : "outline"}>
-                      {selectedAdditionalMembers.length}/{selectedPackage.max_members - 1} selected
-                      {selectedAdditionalMembers.length >= (selectedPackage.max_members - 1) && " (MAX)"}
-                    </Badge>
+                    <Calendar className="h-4 w-4" />
+                    Renewal Start Date
                   </CardTitle>
+                  <CardDescription>
+                    Choose when the new membership period should begin
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <p className="text-sm text-muted-foreground">
-                    This package allows up to {selectedPackage.max_members} members. 
-                    You can add expired members below to include them in this renewal.
-                  </p>
-
-                  {/* Show Selected Additional Members */}
-                  {selectedAdditionalMembers.length > 0 && (
+                  <RadioGroup value={renewalStartDate} onValueChange={(value: 'expiry' | 'today') => setRenewalStartDate(value)}>
                     <div className="space-y-3">
-                      <Label className="text-sm font-medium text-foreground">Selected Additional Members:</Label>
-                      <div className="space-y-2">
-                        {selectedAdditionalMembers.map((additionalMember) => (
-                          <div key={additionalMember.id} className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg">
-                            <div className="flex-1">
-                              <p className="font-medium text-green-800">{additionalMember.first_name} {additionalMember.last_name}</p>
-                              <p className="text-sm text-green-600">{additionalMember.email}</p>
-                              <p className="text-xs text-green-500">
-                                Status: {additionalMember.status} • Expires: {new Date(additionalMember.expiry_date).toLocaleDateString()}
-                              </p>
-                            </div>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => removeAdditionalMember(additionalMember.id)}
-                              className="h-8 w-8 p-0 text-red-600 hover:text-red-700 border-red-200 hover:border-red-300"
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
+                      <label className={`flex items-start space-x-3 p-4 rounded-lg border cursor-pointer transition-colors ${
+                        renewalStartDate === 'expiry' ? 'border-primary bg-primary/10' : 'border-border hover:border-border/60'}`}>
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="expiry" id="expiry" />
+                          <div>
+                            <div className="font-medium text-foreground">Continue from Expiry Date</div>
+                            <p className="text-sm text-muted-foreground mt-1">
+                              New expiry: {member && (() => {
+                                const expiry = new Date(member.expiry_date);
+                                const newExpiry = new Date(expiry);
+                                newExpiry.setMonth(newExpiry.getMonth() + (selectedPackage?.duration_value || duration));
+                                return newExpiry.toLocaleDateString();
+                              })()}
+                            </p>
                           </div>
-                        ))}
-                      </div>
-                      <Separator />
-                    </div>
-                  )}
+                        </div>
+                      </label>
 
-                  {/* Search for additional members */}
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Search className="h-4 w-4 text-muted-foreground" />
-                      <Input
-                        placeholder={
-                          selectedAdditionalMembers.length >= (selectedPackage.max_members - 1) 
-                            ? "Maximum members reached" 
-                            : "Search for expired members to add..."
-                        }
-                        value={existingMemberSearch}
-                        onChange={(e) => setExistingMemberSearch(e.target.value)}
-                        disabled={selectedAdditionalMembers.length >= (selectedPackage.max_members - 1)}
-                        className="flex-1 bg-background border-border"
-                      />
+                      <label className={`flex items-start space-x-3 p-4 rounded-lg border cursor-pointer transition-colors ${
+                        renewalStartDate === 'today' ? 'border-primary bg-primary/10' : 'border-border hover:border-border/60'}`}>
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="today" id="today" />
+                          <div>
+                            <div className="font-medium text-foreground">Start from Today</div>
+                            <p className="text-sm text-muted-foreground mt-1">
+                              New expiry: {(() => {
+                                const today = new Date();
+                                const newExpiry = new Date(today);
+                                newExpiry.setMonth(newExpiry.getMonth() + (selectedPackage?.duration_value || duration));
+                                return newExpiry.toLocaleDateString();
+                              })()}
+                            </p>
+                          </div>
+                        </div>
+                      </label>
                     </div>
-                    
-                    {/* Show filtered expired members */}
-                    <div className="max-h-40 overflow-y-auto space-y-2">
-                      {existingMemberSearch && (
-                        getFilteredMembers().slice(0, 5).map((member) => {
-                          const memberStatus = getMemberStatus(member);
-                          return (
-                            <div key={member.id} className="flex items-center justify-between p-3 bg-gray-800 border border-gray-600 rounded cursor-pointer hover:border-primary/50 hover:bg-gray-700">
-                              <div className="flex-1">
-                                <p className="font-medium text-gray-100">{member.first_name} {member.last_name}</p>
-                                <p className="text-xs text-gray-300">{member.email}</p>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Badge 
-                                  variant="outline" 
-                                  className={`text-xs ${
-                                    memberStatus.color === 'red' ? 'border-red-300 text-red-800' : 'border-border'
-                                  }`}
-                                >
-                                  {memberStatus.status}
-                                </Badge>
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm" 
-                                  className="h-8 px-3"
-                                  onClick={() => addAdditionalMember(member)}
-                                >
-                                  Add
-                                </Button>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
+                  </RadioGroup>
                 </CardContent>
               </Card>
             )}
+
 
             {/* Final Summary */}
             <Card className="border-primary/20 bg-primary/10 gym-card-gradient">

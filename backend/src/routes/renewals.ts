@@ -291,14 +291,15 @@ router.post('/process',
       // Type assertion to include new duration fields
       const typedPackage = renewalPackage as any;
 
-      // Step 4: Calculate new expiry date
       // ✅ Step 4: Calculate new expiry date with synchronized billing for multi-member packages
+      // Step 4: Calculate new expiry date with renewal start date option
       const currentDate = new Date();
-
       let newExpiryDate: Date;
 
-      // MULTI-MEMBER PACKAGE: All members get synchronized dates
-      // MULTI-MEMBER PACKAGE: All members get synchronized dates
+      // Get renewal start date preference (only for individual packages)
+      const { renewalStartDate } = req.body;
+
+      // MULTI-MEMBER PACKAGE: Always use synchronized billing (current behavior)
       if (typedPackage.max_members > 1) {
         console.log('🔄 Multi-member package renewal: Using synchronized billing');
         // All members start from TODAY and expire together
@@ -322,16 +323,22 @@ router.post('/process',
           startDate: currentDate.toISOString().split('T')[0],
           newExpiry: newExpiryDate.toISOString().split('T')[0]
         });
+      } 
+      // INDIVIDUAL PACKAGE: Use renewal start date preference
+      else {
+        console.log('👤 Individual package renewal: Using renewal start date preference:', renewalStartDate);
         
-      } else {
-        // INDIVIDUAL PACKAGE: Use original logic (extend from current expiry)
-        console.log('👤 Individual package renewal: Using original logic');
-        const currentExpiry = new Date(member.expiry_date);
+        if (renewalStartDate === 'today') {
+          // Start from today
+          newExpiryDate = new Date(currentDate);
+          console.log('📅 Starting renewal from today:', currentDate.toISOString().split('T')[0]);
+        } else {
+          // Start from expiry date (default)
+          newExpiryDate = new Date(member.expiry_date);
+          console.log('📅 Starting renewal from expiry date:', member.expiry_date);
+        }
         
-        // ALWAYS start from current expiry date for individual packages (not today)
-        newExpiryDate = new Date(currentExpiry);
-        
-        // Use flexible duration based on package settings
+        // Add duration based on package settings
         if (typedPackage.duration_type === 'days') {
           newExpiryDate.setDate(newExpiryDate.getDate() + (typedPackage.duration_value || parseInt(durationMonths) * 30));
         } else if (typedPackage.duration_type === 'weeks') {
@@ -341,6 +348,12 @@ router.post('/process',
           newExpiryDate.setMonth(newExpiryDate.getMonth() + (typedPackage.duration_value || parseInt(durationMonths)));
         }
         
+        console.log('📅 Individual renewal dates:', {
+          renewalStartDate: renewalStartDate,
+          memberExpiryDate: member.expiry_date,
+          startDate: renewalStartDate === 'today' ? currentDate.toISOString().split('T')[0] : member.expiry_date,
+          newExpiry: newExpiryDate.toISOString().split('T')[0]
+        });
       }
 
       // Step 5: PHASE 1 FIX - Second staff verification before processing

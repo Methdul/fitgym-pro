@@ -394,7 +394,10 @@ const sanitizeRequestData = async (body: any, action: string) => {
       // Payment details
       start_date: body.startDate,
       expiry_date: body.expiryDate,
-      total_amount: body.amountPaid || body.totalAmount
+      total_amount: body.amountPaid || body.totalAmount,
+      
+      // ADD THIS LINE - Track if this is an existing member
+      isExistingMember: body.isExistingMember || false
     };
     
     console.log('💰 AUDIT DEBUG - Captured Financial Data:', JSON.stringify(auditData, null, 2));
