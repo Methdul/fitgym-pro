@@ -827,7 +827,7 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
         console.log('🐛 Staff ID being sent:', authenticatedStaff?.id);
         console.log('🐛 Staff ID type:', typeof authenticatedStaff?.id);
 
-        console.log('Sending member data:', memberData);
+        console.log('🔍 FULL MEMBER DATA:', JSON.stringify(memberData, null, 2));
         console.log('BranchId type:', typeof branchId, 'value:', branchId);
         console.log('PackageId type:', typeof selectedPackage?.id, 'value:', selectedPackage?.id);
 
