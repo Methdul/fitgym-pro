@@ -944,8 +944,9 @@ function generateEnhancedActivityDescription(log: any): string {
   const packageName = extractPackageName(log);
   const amount = extractAmount(log);
   const paymentMethod = requestData.payment_method === 'cash' ? 'Cash' : 
-                       requestData.payment_method === 'card' ? 'Card' : 
-                       requestData.payment_method || 'Unknown';
+                        requestData.payment_method === 'card' ? 'Card' : 
+                        requestData.payment_method === 'paid' ? 'Paid' : 
+                        requestData.payment_method || 'Unknown';
 
   switch (log.action) {
     case 'CREATE_MEMBER':

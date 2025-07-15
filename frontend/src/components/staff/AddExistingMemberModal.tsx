@@ -278,7 +278,7 @@ export const AddExistingMemberModal = ({
           // Personal information
           firstName: member.firstName,
           lastName: member.lastName,
-          email: member.email || `${member.nationalId}@gmail.com`, // Generate email if not provided
+          email: member.email || `${member.nationalId}@gmail.com`,
           phone: member.phone,
           nationalId: member.nationalId,
           address: member.address,
@@ -291,21 +291,29 @@ export const AddExistingMemberModal = ({
           
           // Membership dates (calculated properly)
           startDate: startDate,
-          expiryDate: expiryDateObj.toISOString().split('T')[0], // YYYY-MM-DD format
+          expiryDate: expiryDateObj.toISOString().split('T')[0],
           
           // Payment information (only charge full price for first member)
           amountPaid: i === 0 ? getTotalPrice() : 0, // Only first member pays, others are included
-          paymentMethod: paymentMethod,
+          paymentMethod: 'paid',                      // ✅ FIXED: Use 'paid' for existing members
+          
+          // ✅ ADD INDIVIDUAL PRICING FIELDS FOR DISPLAY
+          individual_share: selectedPackage ? selectedPackage.price / (selectedPackage.max_members || 1) : 0,
+          total_package_cost: selectedPackage ? selectedPackage.price : 0,
+          package_member_count: selectedPackage ? selectedPackage.max_members : 1,
+          package_group_id: `${branchId}_${Date.now()}_${selectedPackage?.name.replace(/\s+/g, '_')}_existing`,
+          is_primary_member: i === 0, // First member is primary
+          
           // Send the actual package duration info to backend
           durationMonths: selectedPackage.duration_type === 'months' ? (selectedPackage.duration_value || selectedPackage.duration_months || 1) : 
-               selectedPackage.duration_type === 'weeks' ? Math.ceil((selectedPackage.duration_value || 1) * 7 / 30) :
-               Math.ceil((selectedPackage.duration_value || 1) / 30), // convert days to approximate months for backend
+              selectedPackage.duration_type === 'weeks' ? Math.ceil((selectedPackage.duration_value || 1) * 7 / 30) :
+              Math.ceil((selectedPackage.duration_value || 1) / 30),
           
           // Staff verification
           staffId: verification.staffId,
           staffPin: verification.pin,
           
-          // Flag for existing member (creates account with simple credentials)
+          // ✅ CRITICAL: Flag for existing member (excludes from revenue)
           isExistingMember: true,
           
           // Additional context
