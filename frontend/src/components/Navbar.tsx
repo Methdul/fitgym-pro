@@ -44,7 +44,7 @@ const Navbar = () => {
           const now = new Date();
           const hoursDiff = (now.getTime() - loginTime.getTime()) / (1000 * 60 * 60);
           
-          if (hoursDiff < 24) { // Session valid for 24 hours
+          if (hoursDiff < 2160) { // Session valid for 90 days (24 * 90)
             console.log('✅ Valid branch session found:', session.branchEmail);
             setBranchSession(session);
             setSessionChecked(true);

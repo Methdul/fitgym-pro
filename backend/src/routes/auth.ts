@@ -402,7 +402,8 @@ router.post('/create-session',
       
       // Generate secure session token
       const sessionToken = `sess_${Date.now()}_${crypto.randomBytes(16).toString('hex')}`;
-      const expiresAt = new Date(Date.now() + (4 * 60 * 60 * 1000)); // 4 hours
+      const expiresAt = new Date(Date.now() + (90 * 24 * 60 * 60 * 1000)); // 90 days
+
       
       // Create session record in database
       const sessionData = {

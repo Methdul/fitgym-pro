@@ -30,7 +30,7 @@ const Login = () => {
       loginTime: new Date().toISOString(),
       userType: 'branch_staff',
       isAuthenticated: true,
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+      expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString() // 90 days
     };
 
     console.log('💾 Creating persistent branch session:', sessionData);

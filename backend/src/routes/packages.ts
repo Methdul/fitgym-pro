@@ -272,14 +272,15 @@ router.post('/',
       // Check for duplicate package name
       const { data: existingPackage } = await supabase
         .from('packages')
-        .select('id, name')
+        .select('id, name, branch_id')
         .eq('name', name)
+        .eq('branch_id', branch_id)
         .single();
 
       if (existingPackage) {
         return res.status(409).json({
           status: 'error',
-          error: 'Package with this name already exists'
+          error: 'Package with this name already exists in this branch'
         });
       }
 

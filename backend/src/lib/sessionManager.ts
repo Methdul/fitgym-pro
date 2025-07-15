@@ -9,7 +9,7 @@ interface Session {
 
 class SessionManager {
   private sessions: Map<string, Session> = new Map();
-  private readonly SESSION_DURATION = 4 * 60 * 60 * 1000; // 4 hours
+  private readonly SESSION_DURATION = 90 * 24 * 60 * 60 * 1000; // 90 days
 
   generateToken(): string {
     return `sess_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;

@@ -372,6 +372,9 @@ const sanitizeRequestData = async (body: any, action: string) => {
     const auditData = {
       // Financial data for analytics - ENHANCED FIELD MAPPING
       package_price: body.customPrice || body.amountPaid || body.package_price || body.packagePrice || body.totalAmount,  // ← ADD body.customPrice ||
+      individual_share: body.individual_share,  // ✅ ADD THIS LINE
+      total_package_cost: body.total_package_cost,  // ✅ ADD THIS LINE
+      package_member_count: body.package_member_count,  // ✅ ADD THIS LINE
       payment_method: body.paymentMethod || body.payment_method,
       package_name: packageInfo?.name || body.package_name || body.packageName || 'Unknown Package',
       package_type: packageInfo?.type || body.package_type || body.packageType,
@@ -405,6 +408,9 @@ const sanitizeRequestData = async (body: any, action: string) => {
     console.log('🔍 CRITICAL FIELD DEBUG:', {
     customPrice: body.customPrice,
     package_price_captured: auditData.package_price,
+    individual_share: body.individual_share,  // ✅ ADD THIS
+    individual_share_captured: auditData.individual_share,  // ✅ ADD THIS
+    total_package_cost: body.total_package_cost,  // ✅ ADD THIS
     firstName: body.firstName,
     lastName: body.lastName,
     member_first_name_captured: auditData.member_first_name,

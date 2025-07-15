@@ -28,7 +28,7 @@ export const setStaffSessionToken = (token: string | null) => {
   staffSessionToken = token;
   if (token) {
     localStorage.setItem('staff_session_token', token);
-    const expiry = Date.now() + (24 * 60 * 60 * 1000);
+    const expiry = Date.now() + (90 * 24 * 60 * 60 * 1000); // 90 days
     localStorage.setItem('staff_session_expiry', expiry.toString());
     console.log('✅ Session token stored with expiry:', new Date(expiry));
   } else {

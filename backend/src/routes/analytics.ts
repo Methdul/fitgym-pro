@@ -223,7 +223,10 @@ function getOptimizedRevenue(
       }
       
       let amount = 0;
-      if (requestData.package_price) {
+      // ✅ FIXED: Use individual_share for new pricing, fallback to package_price for old data
+      if (requestData.individual_share) {
+        amount = parseFloat(requestData.individual_share);
+      } else if (requestData.package_price) {
         amount = parseFloat(requestData.package_price);
       } else if (requestData.total_amount) {
         amount = parseFloat(requestData.total_amount);
@@ -250,7 +253,6 @@ function getOptimizedRevenue(
     }
   });
 
-  // Calculate previous period revenue
   // Calculate previous period revenue (also exclude existing members)
   const previousNewMemberRevenue = previousPeriodLogs.reduce((sum, log) => {
     const requestData = log.request_data?.body || {};
@@ -312,7 +314,10 @@ function getOptimizedTransactions(auditData: OptimizedAuditData): Transaction[] 
       
       // Extract amount
       let amount = 0;
-      if (requestData.package_price) {
+      // ✅ FIXED: Use individual_share for new pricing, fallback to package_price for old data
+      if (requestData.individual_share) {
+        amount = parseFloat(requestData.individual_share);
+      } else if (requestData.package_price) {
         amount = parseFloat(requestData.package_price);
       } else if (requestData.total_amount) {
         amount = parseFloat(requestData.total_amount);
@@ -445,12 +450,15 @@ function getOptimizedStaffPerformance(auditData: OptimizedAuditData): StaffPerfo
       
       const requestData = log.request_data?.body || {};
       let amount = 0;
-      if (requestData.package_price) {
+      // ✅ FIXED: Use individual_share for new pricing, fallback to package_price for old data
+      if (requestData.individual_share) {
+        amount = parseFloat(requestData.individual_share);
+      } else if (requestData.package_price) {
         amount = parseFloat(requestData.package_price);
       } else if (requestData.total_amount) {
         amount = parseFloat(requestData.total_amount);
       }
-      
+
       staffStats[staffEmail].revenue += amount;
       staffStats[staffEmail].totalTransactions += 1;
       staffStats[staffEmail].newMembers += 1;
@@ -510,7 +518,10 @@ function getOptimizedPackagePerformance(auditData: OptimizedAuditData): PackageP
         
         if (requestData.package_id === pkg.id) {
           let amount = 0;
-          if (requestData.package_price) {
+          // ✅ FIXED: Use individual_share for new pricing, fallback to package_price for old data
+          if (requestData.individual_share) {
+            amount = parseFloat(requestData.individual_share);
+          } else if (requestData.package_price) {
             amount = parseFloat(requestData.package_price);
           } else if (requestData.total_amount) {
             amount = parseFloat(requestData.total_amount);
@@ -575,7 +586,7 @@ async function getOptimizedTimeAnalytics(branchId: string, start: Date, end: Dat
     // Single query for all new members in period
     supabase
       .from('members')
-      .select('created_at, package_price')
+      .select('created_at, package_price, individual_share')        
       .eq('branch_id', branchId)
       .gte('created_at', start.toISOString())
       .lt('created_at', end.toISOString())
@@ -616,7 +627,9 @@ async function getOptimizedTimeAnalytics(branchId: string, start: Date, end: Dat
   newMembers.forEach(member => {
     const dateKey = new Date(member.created_at).toISOString().split('T')[0];
     if (dailyData[dateKey]) {
-      dailyData[dateKey].revenue += member.package_price || 0;
+      // ✅ FIXED: Use individual_share for new pricing, fallback to package_price for old data
+      const amount = member.individual_share || member.package_price || 0;
+      dailyData[dateKey].revenue += amount;
       dailyData[dateKey].transactions += 1;
       dailyData[dateKey].newMembers += 1;
     }
@@ -1104,7 +1117,10 @@ function extractPackageName(log: any): string {
 function extractAmount(log: any): number {
   const requestData = log.request_data?.body || {};
   
-  if (requestData.package_price) {
+  // ✅ FIXED: Use individual_share for new pricing, fallback to package_price for old data
+  if (requestData.individual_share) {
+    return parseFloat(requestData.individual_share);
+  } else if (requestData.package_price) {
     return parseFloat(requestData.package_price);
   } else if (requestData.total_amount) {
     return parseFloat(requestData.total_amount);

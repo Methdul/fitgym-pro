@@ -139,7 +139,12 @@ router.post('/',
         dateOfBirth,
         address,
         staffId,        // PIN verification fields
-        staffPin        // PIN verification fields
+        staffPin,      // PIN verification fields
+        individual_share,
+        total_package_cost,
+        package_member_count,
+        package_group_id,
+        is_primary_member
       } = req.body;
       
       // ✅ ADD PIN VERIFICATION BEFORE ANYTHING ELSE
@@ -314,14 +319,25 @@ router.post('/',
         // Calculate dates based on package type and member type
         let memberStartDate: string, memberExpiryDate: string, memberStatus: string;
 
-        // MULTI-MEMBER PACKAGE LOGIC: All members get synchronized dates
+        // MULTI-MEMBER PACKAGE LOGIC: Respect existing member payment dates
         if (package_.max_members > 1) {
-          console.log('🔄 Multi-member package: Using synchronized billing for all members');
-          // All members in family/couple packages start TODAY and expire together
-          memberStartDate = new Date().toISOString().split('T')[0];
-          const expiryDateObj = new Date();
+          console.log('🔄 Multi-member package: Processing with payment date awareness');
           
-          // 🎯 FIXED: Smart duration calculation for multi-member packages
+          // 🎯 FIXED: Check if this is an existing member with lastPaymentDate
+          if (startDate) {
+            // Existing member: use provided start date (last payment date)
+            memberStartDate = startDate;
+            console.log('📅 Using existing member payment date:', startDate);
+          } else {
+            // New member: use current date for synchronized billing
+            memberStartDate = new Date().toISOString().split('T')[0];
+            console.log('📅 Using current date for new member:', memberStartDate);
+          }
+          
+          // Calculate expiry date from the determined start date
+          const expiryDateObj = new Date(memberStartDate);
+          
+          // 🎯 Smart duration calculation for multi-member packages
           const durationValue = duration || package_.duration_value || package_.duration_months || 1;
           const durationType = package_.duration_type || 'months';
           
@@ -335,11 +351,14 @@ router.post('/',
           
           memberExpiryDate = expiryDateObj.toISOString().split('T')[0];
           
-          console.log('📅 Synchronized dates:', {
+          console.log('📅 Multi-member package dates:', {
             startDate: memberStartDate,
             expiryDate: memberExpiryDate,
             packageType: package_.type,
-            maxMembers: package_.max_members
+            maxMembers: package_.max_members,
+            isExistingMember: !!startDate,
+            durationValue: durationValue,
+            durationType: durationType
           });
           
         } else {
@@ -415,6 +434,11 @@ router.post('/',
           start_date: memberStartDate,
           expiry_date: memberExpiryDate,
           is_verified: false,
+          individual_share: individual_share,
+          total_package_cost: total_package_cost,
+          package_member_count: package_member_count,
+          package_group_id: package_group_id,
+          is_primary_member: is_primary_member,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         };
