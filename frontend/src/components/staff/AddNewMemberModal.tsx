@@ -802,6 +802,14 @@ export const AddNewMemberModal = ({ open, onOpenChange, branchId, onMemberAdded,
           emergencyContact: member.emergencyContact || '',
           address: member.address || '',
           nationalId: member.nationalId || '',
+
+          // ADD THESE NEW LINES:
+          individual_share: selectedPackage ? selectedPackage.price / selectedPackage.max_members : 0,
+          total_package_cost: selectedPackage ? selectedPackage.price : 0,
+          package_member_count: selectedPackage ? selectedPackage.max_members : 1,
+          package_group_id: `${branchId}_${Date.now()}_${selectedPackage?.name.replace(/\s+/g, '_')}`,
+          is_primary_member: i === 0, // First member is primary (who pays)
+
           // Enhanced: Handle existing member specific data
           ...(isExistingMember ? {
             manualPrice: parseFloat(manualPrice),

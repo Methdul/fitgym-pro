@@ -851,16 +851,14 @@ const AnalyticsTab = ({ branchId, branchName }: AnalyticsTabProps) => {
       </Card>
 
       {/* Revenue Overview Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Total Revenue</p>
                 <p className="text-2xl font-bold">{formatCurrency(analytics.revenue.total)}</p>
-                <p className={`text-xs ${getChangeColor(analytics.revenue.comparison.change)}`}>
-                  {getChangeIcon(analytics.revenue.comparison.change)} {formatCurrency(Math.abs(analytics.revenue.comparison.change))} ({analytics.revenue.comparison.changePercent.toFixed(1)}%)
-                </p>
+                <p className="text-xs text-muted-foreground">All sources combined</p>
               </div>
               <DollarSign className="h-8 w-8 text-primary" />
             </div>

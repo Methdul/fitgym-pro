@@ -398,12 +398,7 @@ useEffect(() => {
       return getActualMemberStatus(m) === 'active' && expiryDate <= nextWeek && expiryDate > now;
     }).length;
 
-    const monthlyRevenue = members
-      .filter(m => {
-        const memberDate = new Date(m.created_at);
-        return memberDate >= thisMonth;
-      })
-      .reduce((sum, m) => sum + m.package_price, 0);
+
 
     const newMembersThisMonth = members.filter(m => {
       const memberDate = new Date(m.created_at);
@@ -421,7 +416,6 @@ useEffect(() => {
       totalStaff: staff.length,
       totalPackages: packages.length,
       activePackages: packages.length,
-      monthlyRevenue,
       newMembersThisMonth,
       retentionRate,
       seniorStaffCount,
@@ -1215,7 +1209,7 @@ useEffect(() => {
         )}
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
           <Card className="border-border">
             <CardContent className="p-4">
               <div className="flex items-center space-x-2">
@@ -1281,18 +1275,6 @@ useEffect(() => {
             </CardContent>
           </Card>
 
-          <Card className="border-border">
-            <CardContent className="p-4">
-              <div className="flex items-center space-x-2">
-                <TrendingUp className="h-5 w-5 text-primary" />
-                <div>
-                  <p className="text-sm text-muted-foreground">Monthly Revenue</p>
-                  <p className="text-2xl font-bold text-primary">${stats.monthlyRevenue.toFixed(2)}</p>
-                  <p className="text-xs text-green-500">+8% vs last month</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
         </div>
 
         {/* Main Content */}
@@ -1677,7 +1659,7 @@ useEffect(() => {
               </Dialog>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
               {packages.map((pkg) => (
                 <Card key={pkg.id} className="border-border">
                   <CardHeader>
