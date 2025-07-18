@@ -58,6 +58,7 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
   const [selectedAdditionalMembers, setSelectedAdditionalMembers] = useState<Member[]>([]);
   const [existingMemberSearch, setExistingMemberSearch] = useState('');
   const [searchingMembers, setSearchingMembers] = useState(false);
+  const [renewedMembers, setRenewedMembers] = useState<any[]>([]);
   const { toast } = useToast();
 
   const handleClose = () => {
@@ -310,15 +311,27 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
       const result = await response.json();
       console.log('✅ Renewal success:', result);
 
-      const memberCount = 1 + selectedAdditionalMembers.length;
+      // Prepare renewed members data for success display
+      const renewedMembersData = [
+        {
+          fullName: `${member.first_name} ${member.last_name}`,
+          id: member.id
+        },
+        ...selectedAdditionalMembers.map(m => ({
+          fullName: `${m.first_name} ${m.last_name}`,
+          id: m.id
+        }))
+      ];
+
+      setRenewedMembers(renewedMembersData);
+      setStep(4); // Go to success step
+
       toast({
-        title: "Renewal Successful! 🎉",
-        description: `${memberCount} member${memberCount > 1 ? 's have' : ' has'} been successfully renewed.`,
+        title: "Renewal Successful!",
+        description: `${renewedMembersData.length} member${renewedMembersData.length > 1 ? 's have' : ' has'} been successfully renewed.`,
       });
 
-      resetForm();
       onRenewalComplete();
-      onClose();
 
     } catch (error) {
       console.error('Error processing renewal:', error);
@@ -343,6 +356,7 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
     setSelectedAdditionalMembers([]);
     setExistingMembers([]);
     setExistingMemberSearch('');
+    setRenewedMembers([]);
   };
 
   if (!member) return null;
@@ -980,8 +994,48 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
           </div>
         )}
 
+        {/* Step 4: Success */}
+        {step === 4 && (
+          <div className="space-y-6">
+            <div className="text-center mb-6">
+              <CheckCircle className="h-16 w-16 mx-auto mb-4 text-green-500" />
+              <h3 className="text-xl font-bold text-foreground">Renewal Successful!</h3>
+              <p className="text-muted-foreground">
+                {renewedMembers.length} member{renewedMembers.length > 1 ? 's have' : ' has'} been successfully renewed.
+              </p>
+            </div>
+
+            {/* SIMPLE SUCCESS LIST - NEW DESIGN */}
+            <Card className="bg-green-50 border-green-200">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base text-green-800 flex items-center gap-2">
+                  <CheckCircle className="h-5 w-5" />
+                  Successfully Renewed Members
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {renewedMembers.map((memberData, index) => (
+                    <div key={index} className="flex items-center gap-3 p-3 bg-white rounded border border-green-200">
+                      <CheckCircle className="h-5 w-5 text-green-600" />
+                      <span className="font-medium text-green-900">{memberData.fullName}</span>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="text-center">
+              <Button onClick={handleClose} className="min-w-32">
+                Close
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* Navigation Buttons */}
-        <div className="flex justify-between pt-4 border-t border-border">
+        {step !== 4 && (
+          <div className="flex justify-between pt-4 border-t border-border">
           <div>
             {step > 1 ? (
               <Button variant="outline" onClick={() => setStep(step - 1)}>
@@ -1006,7 +1060,7 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
               >
                 {step === 2 ? 'Review & Verify' : 'Next'}
               </Button>
-            ) : (
+            ) : step === 3 ? (
               <Button 
                 onClick={handleRenewal}
                 disabled={!verification.staffId || !verification.pin || loading}
@@ -1024,9 +1078,10 @@ const RenewMemberModal = ({ isOpen, onClose, member, branchId, onRenewalComplete
                   </>
                 )}
               </Button>
-            )}
+            ) : null}
           </div>
         </div>
+        )}
       </DialogContent>
     </Dialog>
   );
