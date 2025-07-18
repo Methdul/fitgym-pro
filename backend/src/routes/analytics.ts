@@ -109,16 +109,16 @@ async function fetchOptimizedAuditData(
   // 🚀 FIXED: Query both audit_logs AND member_renewals
   const [auditResult, packagesResult, previousAuditResult, renewalsResult, previousRenewalsResult] = await Promise.all([
     // Main audit logs query (for new members)
-    supabase
-      .from('audit_logs')
-      .select('*')
-      .eq('branch_id', branchId)
-      .in('action', ['CREATE_MEMBER', 'DELETE_STAFF', 'CREATE_STAFF'])
-      .eq('success', true)
-      .gte('timestamp', start.toISOString())
-      .lt('timestamp', end.toISOString())
-      .limit(limit)
-      .order('timestamp', { ascending: false }),
+        supabase
+          .from('audit_logs')
+          .select('*')
+          .eq('branch_id', branchId)
+          .in('action', ['CREATE_MEMBER', 'DELETE_STAFF', 'CREATE_STAFF'])
+          .eq('success', true)
+          .gte('timestamp', start.toISOString())
+          .lt('timestamp', end.toISOString())
+          .limit(limit)
+          .order('timestamp', { ascending: false }),
     
     // Branch packages query
     supabase
@@ -345,7 +345,7 @@ function getOptimizedTransactions(auditData: OptimizedAuditData): Transaction[] 
         packageName: packageName,
         amount: amount,
         paymentMethod: paymentMethod,
-        processedBy: log.user_email?.split('@')[0] || 'Unknown Staff',
+        processedBy: log.branch_staff ? `${log.branch_staff.first_name} ${log.branch_staff.last_name}` : (log.user_email?.split('@')[0] || 'Unknown Staff'),
         memberStatus: responseData.success ? 'Active' : 'Pending'
       });
     }
@@ -434,19 +434,21 @@ function getOptimizedStaffPerformance(auditData: OptimizedAuditData): StaffPerfo
   
   // Process new members from audit logs
   auditLogs.forEach(log => {
-    if (log.action === 'CREATE_MEMBER') {
-      const staffEmail = log.user_email;
-      if (!staffEmail) return;
-      
-      if (!staffStats[staffEmail]) {
-        staffStats[staffEmail] = {
-          email: staffEmail,
-          newMembers: 0,
-          renewals: 0,
-          revenue: 0,
-          totalTransactions: 0
-        };
-      }
+      if (log.action === 'CREATE_MEMBER') {
+        const staffEmail = log.user_email;
+        const staffName = log.branch_staff ? `${log.branch_staff.first_name} ${log.branch_staff.last_name}` : (log.user_email?.split('@')[0] || 'Unknown Staff');
+        if (!staffEmail) return;
+        
+        if (!staffStats[staffEmail]) {
+          staffStats[staffEmail] = {
+            email: staffEmail,
+            name: staffName,
+            newMembers: 0,
+            renewals: 0,
+            revenue: 0,
+            totalTransactions: 0
+          };
+        }
       
       const requestData = log.request_data?.body || {};
       let amount = 0;
@@ -467,18 +469,20 @@ function getOptimizedStaffPerformance(auditData: OptimizedAuditData): StaffPerfo
 
   // ✅ FIXED: Process renewals from member_renewals table
   renewals.forEach(renewal => {
-    const staffEmail = renewal.branch_staff?.email;
-    if (!staffEmail) return;
-    
-    if (!staffStats[staffEmail]) {
-      staffStats[staffEmail] = {
-        email: staffEmail,
-        newMembers: 0,
-        renewals: 0,
-        revenue: 0,
-        totalTransactions: 0
-      };
-    }
+      const staffEmail = renewal.branch_staff?.email;
+      const staffName = renewal.branch_staff ? `${renewal.branch_staff.first_name} ${renewal.branch_staff.last_name}` : 'Unknown Staff';
+      if (!staffEmail) return;
+      
+      if (!staffStats[staffEmail]) {
+        staffStats[staffEmail] = {
+          email: staffEmail,
+          name: staffName,
+          newMembers: 0,
+          renewals: 0,
+          revenue: 0,
+          totalTransactions: 0
+        };
+      }
     
     const amount = parseFloat(renewal.amount_paid || 0);
     staffStats[staffEmail].revenue += amount;
@@ -487,14 +491,14 @@ function getOptimizedStaffPerformance(auditData: OptimizedAuditData): StaffPerfo
   });
 
   const performance: StaffPerformance[] = Object.values(staffStats).map((stats: any) => ({
-    id: stats.email,
-    name: stats.email.split('@')[0],
-    role: 'Staff',
-    newMembers: stats.newMembers,
-    renewals: stats.renewals,
-    totalTransactions: stats.totalTransactions,
-    revenue: stats.revenue
-  }));
+      id: stats.email,
+      name: stats.name || stats.email.split('@')[0],
+      role: 'Staff',
+      newMembers: stats.newMembers,
+      renewals: stats.renewals,
+      totalTransactions: stats.totalTransactions,
+      revenue: stats.revenue
+    }));
 
   console.log(`📊 OPTIMIZED: Staff performance calculated for ${performance.length} staff members`);
   return performance.sort((a, b) => b.revenue - a.revenue);

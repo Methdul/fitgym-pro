@@ -894,114 +894,44 @@ export const AddExistingMemberModal = ({
           </div>
         );
 
-      case 'success':
-        return (
-          <div className="space-y-6">
-            <div className="text-center mb-6">
-              <CheckCircle className="h-16 w-16 mx-auto mb-4 text-green-500" />
-              <h3 className="text-xl font-semibold text-green-700">Members Successfully Added!</h3>
-              <p className="text-muted-foreground">
-                {createdMembers.length} member{createdMembers.length > 1 ? 's have' : ' has'} been added to the system
-              </p>
-            </div>
+        case 'success':
+          return (
+            <div className="space-y-6">
+              <div className="text-center mb-6">
+                <CheckCircle className="h-16 w-16 mx-auto mb-4 text-green-500" />
+                <h3 className="text-xl font-bold text-foreground">Members Successfully Added!</h3>
+                <p className="text-muted-foreground">
+                  {createdMembers.length} member{createdMembers.length > 1 ? 's have' : ' has'} been added to your system.
+                </p>
+              </div>
 
-            {/* Member Details */}
-            <div className="space-y-4">
-              {createdMembers.map((memberData, index) => (
-                <Card key={index} className="border-green-200 bg-green-50">
-                  <CardHeader>
-                    <CardTitle className="text-green-800 flex items-center justify-between">
-                      {memberData.fullName}
-                      <Badge variant="outline" className="text-green-700 border-green-400">
-                        Member {index + 1}
-                      </Badge>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <p className="text-green-600">National ID:</p>
-                        <p className="font-semibold text-green-900">{memberData.member.national_id}</p>
-                      </div>
-                      <div>
-                        <p className="text-green-600">Phone:</p>
-                        <p className="font-semibold text-green-900">{memberData.member.phone}</p>
-                      </div>
-                      <div>
-                        <p className="text-green-600">Start Date:</p>
-                        <p className="font-semibold text-green-900">{new Date(memberData.member.start_date).toLocaleDateString()}</p>
-                      </div>
-                      <div>
-                        <p className="text-green-600">Expiry Date:</p>
-                        <p className="font-semibold text-green-900">{new Date(memberData.member.expiry_date).toLocaleDateString()}</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-
-            {/* Login Credentials */}
-            <Card className="border-blue-200 bg-blue-50">
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle className="text-blue-800">Login Credentials</CardTitle>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowCredentials(!showCredentials)}
-                >
-                  {showCredentials ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  {showCredentials ? ' Hide' : ' Show'}
-                </Button>
-              </CardHeader>
-              <CardContent>
-                {showCredentials ? (
-                  <div className="space-y-4">
+              {/* SIMPLE SUCCESS LIST - NEW DESIGN */}
+              <Card className="bg-green-50 border-green-200">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base text-green-800 flex items-center gap-2">
+                    <CheckCircle className="h-5 w-5" />
+                    Successfully Added Members
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
                     {createdMembers.map((memberData, index) => (
-                      <div key={index} className="p-3 bg-white rounded border">
-                        <h4 className="font-semibold text-blue-900 mb-2">{memberData.fullName}</h4>
-                        <div className="grid grid-cols-1 gap-2">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <p className="text-sm text-muted-foreground">Email</p>
-                              <p className="font-mono text-sm">{memberData.account.email}</p>
-                            </div>
-                            <Button size="sm" variant="outline" onClick={() => copyToClipboard(memberData.account.email)}>
-                              <Copy className="h-4 w-4" />
-                            </Button>
-                          </div>
-                          
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <p className="text-sm text-muted-foreground">Temporary Password</p>
-                              <p className="font-mono text-sm">{memberData.account.temporaryPassword}</p>
-                            </div>
-                            <Button size="sm" variant="outline" onClick={() => copyToClipboard(memberData.account.temporaryPassword)}>
-                              <Copy className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
+                      <div key={index} className="flex items-center gap-3 p-3 bg-white rounded border border-green-200">
+                        <CheckCircle className="h-5 w-5 text-green-600" />
+                        <span className="font-medium text-green-900">{memberData.fullName}</span>
                       </div>
                     ))}
                   </div>
-                ) : (
-                  <p className="text-blue-700 text-sm">Click the eye icon to view login credentials for all members</p>
-                )}
-                
-                <div className="mt-4 text-xs text-blue-600 bg-blue-100 p-3 rounded">
-                  <Info className="h-3 w-3 inline mr-1" />
-                  Provide these credentials to the members. They can update their email and password after first login.
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
 
-            <div className="text-center">
-              <Button onClick={() => onOpenChange(false)} className="min-w-32">
-                Close
-              </Button>
+              <div className="text-center">
+                <Button onClick={() => onOpenChange(false)} className="min-w-32">
+                  Close
+                </Button>
+              </div>
             </div>
-          </div>
-        );
+          );
 
       default:
         return null;
